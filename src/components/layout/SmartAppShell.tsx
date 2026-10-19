@@ -29,6 +29,7 @@ import { createClient } from "@/lib/supabase/client";
 
 interface SmartAppShellProps {
   initialCategories: ItemClass[];
+  categoryThumbs?: Record<number, string>;
   initialItems: ItemWithImages[];
   totalCatalogCount: number;
   initialFlashDeals: ItemWithImages[];
@@ -41,6 +42,7 @@ interface SmartAppShellProps {
 
 export function SmartAppShell({
   initialCategories,
+  categoryThumbs,
   initialItems,
   totalCatalogCount,
   initialFlashDeals,
@@ -130,6 +132,7 @@ export function SmartAppShell({
         {activeTab === "home" ? (
           <SmartHomeView
             categories={initialCategories}
+            categoryThumbs={categoryThumbs}
             initialItems={initialItems}
             totalCatalogCount={totalCatalogCount}
             initialFlashDeals={initialFlashDeals}

@@ -10,6 +10,16 @@ import {
   SmartDeliveryZone,
 } from "@/types/smart.types";
 import { DEFAULT_SMART_SETTINGS } from "@/lib/smartSettings";
+import { getItemImageUrl } from "@/lib/media";
+
+interface CategoryThumbnailRow {
+  class_id: number;
+  item_count: number;
+  item_id: number | null;
+  item_code: string | null;
+  image_updated_at: string | null;
+  hero1: string | null;
+}
 
 export default async function HomePage() {
   const supabaseUrl =
@@ -47,17 +57,50 @@ export default async function HomePage() {
     console.error("Failed to fetch smart_app_settings:", err);
   }
 
-  // 2. Load real categories from public.item_class
-  const { data: categoriesData } = await supabase
-    .from("item_class")
-    .select("*")
-    .order("item_class", { ascending: true });
+  // 2. Load real categories from public.item_class + representative category thumbnails via RPC
+  const [{ data: categoriesData }, { data: catThumbsData }] = await Promise.all([
+    supabase
+      .from("item_class")
+      .select("*")
+      .order("item_class", { ascending: true }),
+    supabase.rpc("smart_get_category_thumbnails"),
+  ]);
+
+  const activeClassIds = new Set<number>();
+  const categoryThumbs: Record<number, string> = {};
+
+  if (Array.isArray(catThumbsData)) {
+    for (const row of catThumbsData as CategoryThumbnailRow[]) {
+      const classId = Number(row.class_id);
+      if (Number(row.item_count) > 0) {
+        activeClassIds.add(classId);
+      }
+      if (row.hero1) {
+        const thumbUrl = row.hero1.startsWith("http")
+          ? row.hero1
+          : getItemImageUrl(
+              {
+                code: row.item_code ?? "",
+                item_images: { hero1: row.hero1 },
+              },
+              "thumb"
+            );
+        if (thumbUrl && !thumbUrl.startsWith("data:image/svg+xml")) {
+          categoryThumbs[classId] = thumbUrl;
+        }
+      }
+    }
+  }
 
   const rawCategories = (categoriesData as ItemClass[]) || [];
   const hiddenSet = new Set(appSettings.hidden_categories.map(Number));
-  const categories = rawCategories.filter(
+  const visibleCats = rawCategories.filter(
     (c) => !hiddenSet.has(Number(c.item_class_id))
   );
+  const categories =
+    activeClassIds.size > 0
+      ? visibleCats.filter((c) => activeClassIds.has(Number(c.item_class_id)))
+      : visibleCats;
 
   // 3. Load real delivery zones from public.smart_delivery_zones
   const { data: zonesData } = await supabase
@@ -135,6 +178,7 @@ export default async function HomePage() {
   return (
     <SmartAppShell
       initialCategories={categories}
+      categoryThumbs={categoryThumbs}
       initialItems={initialItems}
       totalCatalogCount={totalCount || initialItems.length}
       initialFlashDeals={initialFlashDeals}

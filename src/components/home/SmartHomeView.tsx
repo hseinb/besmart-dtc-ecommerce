@@ -32,6 +32,7 @@ const PAGE_SIZE = 40;
 
 interface SmartHomeViewProps {
   categories: ItemClass[];
+  categoryThumbs?: Record<number, string>;
   initialItems: ItemWithImages[];
   totalCatalogCount: number;
   initialFlashDeals: ItemWithImages[];
@@ -42,6 +43,7 @@ interface SmartHomeViewProps {
 
 export function SmartHomeView({
   categories,
+  categoryThumbs,
   initialItems,
   totalCatalogCount,
   initialFlashDeals,
@@ -82,17 +84,88 @@ export function SmartHomeView({
     useState<ItemWithImages[]>(initialFlashDeals);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [countdownText, setCountdownText] = useState<string | null>(null);
+  const [clientCategoryThumbs, setClientCategoryThumbs] = useState<
+    Record<number, string>
+  >(categoryThumbs || {});
+  const [activeClassIdSet, setActiveClassIdSet] = useState<Set<number>>(
+    new Set()
+  );
 
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
 
+  // Hydrate category thumbnails & active category counts on client via RPC if needed
+  useEffect(() => {
+    let cancelled = false;
+    async function loadLiveCategoryThumbs() {
+      const supabase = createClient();
+      const { data } = await supabase.rpc("smart_get_category_thumbnails");
+      if (cancelled || !Array.isArray(data)) return;
+
+      const nextActive = new Set<number>();
+      const nextThumbs: Record<number, string> = {};
+      for (const row of data as {
+        class_id: number;
+        item_count: number;
+        item_id: number | null;
+        item_code: string | null;
+        image_updated_at: string | null;
+        hero1: string | null;
+      }[]) {
+        const classId = Number(row.class_id);
+        if (Number(row.item_count) > 0) {
+          nextActive.add(classId);
+        }
+        if (row.hero1) {
+          const thumbUrl = row.hero1.startsWith("http")
+            ? row.hero1
+            : getItemImageUrl(
+                {
+                  code: row.item_code ?? "",
+                  item_images: { hero1: row.hero1 },
+                },
+                "thumb"
+              );
+          if (thumbUrl && !thumbUrl.startsWith("data:image/svg+xml")) {
+            nextThumbs[classId] = thumbUrl;
+          }
+        }
+      }
+      if (nextActive.size > 0) {
+        setActiveClassIdSet(nextActive);
+      }
+      if (Object.keys(nextThumbs).length > 0) {
+        setClientCategoryThumbs((prev) => ({ ...prev, ...nextThumbs }));
+      }
+    }
+    loadLiveCategoryThumbs();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const visibleCategories = React.useMemo(() => {
     const hidden = new Set((appSettings.hidden_categories || []).map(Number));
-    return categories.filter((c) => !hidden.has(Number(c.item_class_id)));
-  }, [categories, appSettings.hidden_categories]);
+    const nonHidden = categories.filter(
+      (c) => !hidden.has(Number(c.item_class_id))
+    );
+    if (activeClassIdSet.size > 0) {
+      return nonHidden.filter((c) =>
+        activeClassIdSet.has(Number(c.item_class_id))
+      );
+    }
+    return nonHidden;
+  }, [categories, appSettings.hidden_categories, activeClassIdSet]);
 
-  // Map a representative thumbnail per category from loaded items
+  // Map a representative thumbnail per category (seeded from smart_get_category_thumbnails RPC + fallback to loaded items)
   const categoryThumbMap = React.useMemo(() => {
     const map = new Map<number, string>();
+    const mergedRecord = { ...(categoryThumbs || {}), ...clientCategoryThumbs };
+    for (const [k, url] of Object.entries(mergedRecord)) {
+      const classId = Number(k);
+      if (classId && url && !url.startsWith("data:image/svg+xml")) {
+        map.set(classId, url);
+      }
+    }
     for (const item of [...initialItems, ...flashDeals, ...items]) {
       if (item.class_id && !map.has(item.class_id)) {
         const url = getItemImageUrl(item, "thumb");
@@ -102,7 +175,7 @@ export function SmartHomeView({
       }
     }
     return map;
-  }, [initialItems, flashDeals, items]);
+  }, [categoryThumbs, clientCategoryThumbs, initialItems, flashDeals, items]);
 
   // Live Flash Sale Countdown Timer (if smart_app_settings.flash_sale_ends_at is set)
   useEffect(() => {

@@ -12,6 +12,14 @@ const R2_PUBLIC_BASE =
 export function parseImageSlot(slot: Json | null | undefined): ImageTierUrls | null {
   if (!slot) return null;
   if (typeof slot === "string") {
+    const trimmed = slot.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return parseImageSlot(JSON.parse(trimmed) as Json);
+      } catch {
+        // Fall through to plain string URL resolution
+      }
+    }
     return {
       thumb: resolveMediaUrl(slot),
       view: resolveMediaUrl(slot),

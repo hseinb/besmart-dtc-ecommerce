@@ -5,22 +5,23 @@ This file tracks bugs, UI glitches, sync issues, and platform discrepancies acro
 ---
 
 ## Active Issues
-
-*No active issues currently logged.*
+*None currently active.*
 
 ---
 
 ## Resolved Issues
 
-### BUG-002: `column "customer_phone" does not exist` When Creating or Signing Into a Customer Account
+### BUG-003: "Shop by Category" Showing 2-Letter Initials Instead of Product Images
 - **Status**: `Resolved`
 - **Description & Reproduction Steps**:
-  1. Fill out the **Create Account** form (`Full Name`, `Mobile Phone Number`, `Password`, `Email`) and submit.
-  2. Supabase returns error: `column "customer_phone" does not exist`.
-- **Root Cause**:
-  - In `public.smart_register_customer` and `public.smart_authenticate_customer`, the guest-order linking statement queried `WHERE customer_phone = v_clean_phone`, whereas the actual column on `public.smart_orders` is **`recipient_phone`**.
+  1. Open the B's Mart Home page and view the **"Shop by Category"** circular bubbles grid.
+  2. Notice that 15 categories (e.g., `Accent Furniture` -> `AF`, `Barbecue Needs` -> `BN`, `Cleaning Supplies` -> `CS`, `Dining Utensils` -> `DU`, `Bath Textiles` -> `BT`) displayed 2-letter initials instead of a product photograph.
+- **Root Causes**:
+  1. **Pagination Sampling Starvation ([SmartHomeView.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/home/SmartHomeView.tsx))**: `categoryThumbMap` only scanned `[...initialItems, ...flashDeals, ...items]`, which on initial page load only contained the first 40 catalog items (`range(0, 39)` ordered globally by `image_updated_at DESC`) plus 12 flash deal items. Any category without a product in that initial 40-item slice had no entry in `categoryThumbMap`.
+  2. **0-Item Category (`Accent Furniture`)**: `Accent Furniture` (`item_class_id = 1`) had `0` items in `public.smart_items`, causing it to always show `AF` and lead to an empty category view.
 - **Resolution**:
-  - Applied migration `fix_smart_customer_auth_recipient_phone` updating `public.smart_register_customer` and `public.smart_authenticate_customer` to link guest orders via `WHERE recipient_phone = v_clean_phone AND customer_id IS NULL`.
+  1. Created and wired `public.smart_get_category_thumbnails()` RPC in [page.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/app/page.tsx) and [SmartHomeView.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/home/SmartHomeView.tsx) to return 1 representative product image (`hero1`) and `item_count` per category across the entire catalog.
+  2. Filtered out categories with `item_count === 0` (`Accent Furniture`) and seeded `categoryThumbMap` with the RPC thumbnails.
 
 ### BUG-001: Sign-In / Create Account Modal Closes While Typing in Fields
 - **Status**: `Resolved`
