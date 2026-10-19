@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;      /* Crisp Coastal Alabaster #F8FAFC */
+    --foreground: 215 60% 11%;      /* Deep Ocean Ink #0B192C */
+    --card: 0 0% 100%;
+    --card-foreground: 215 60% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 60% 11%;
+    --primary: 199 100% 26%;        /* B's Mart Teal-Sapphire Ocean Blue #005A87 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 203 90% 16%;       /* Deep Ocean Sapphire #04324E */
+    --secondary-foreground: 0 0% 100%;
+    --accent: 43 100% 50%;          /* Luminous Metallic Yellow-Gold #FFB800 */
+    --accent-foreground: 215 60% 11%;
+    --destructive: 16 100% 56%;     /* Flash Sale Coral-Orange #FF5A1F */
+    --destructive-foreground: 0 0% 100%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 199 100% 26%;
+    --radius: 0.875rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overscroll-behavior-y: none;
+  }
+}
+
+.tabular-numbers {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hide scrollbars on horizontal category ribbons while keeping smooth swipe */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Prevent iOS WebKit double-tap zoom & auto focus zoom */
+html,
+body {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media screen and (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Mobile Capacitor Safe Area Insets */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}

@@ -1,0 +1,24 @@
+{
+  "name": "B's Mart — Smart Home & Lifestyle Shopping",
+  "short_name": "B's Mart",
+  "description": "Shop home, kitchen, lifestyle & everyday essentials with fast delivery across Lebanon.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#04324E",
+  "theme_color": "#005A87",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
