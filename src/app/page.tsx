@@ -22,12 +22,8 @@ interface CategoryThumbnailRow {
 }
 
 export default async function HomePage() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    "https://nhellhapzcylcukdxcwo.supabase.co";
-  const supabaseKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    "sb_publishable_EDjiXt4xhai8kjZtcGL4Kg_hvDYJuMD";
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
