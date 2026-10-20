@@ -66,19 +66,21 @@ This document tracks finalized brand/UI specs, active feature discussions, and t
 ---
 
 ## 2. Active Discussion
+*(No active pending discussions — all approved ideas moved to Completed Ideas below.)*
 
-### A. Unified Sign-In Flow (Zero Public Admin / Staff References)
-- **User Proposal**:
-  - Remove all public `"Admin"` buttons and `"Admin / Staff Portal"` references from the storefront ([SmartHeader.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/layout/SmartHeader.tsx) and [SmartMeView.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/profile/SmartMeView.tsx)).
-  - Use a single, clean **"Sign In"** button and modal for everyone.
-- **Proposed Unified Authentication Flow**:
-  1. **Zero Public Admin Clutter**:
-     - Anonymous visitors and regular shoppers see **zero** `"Admin"` or `"Staff"` buttons/labels anywhere in the header, mobile bar, or `Me` tab.
-     - Only a clean **"Sign In"** button is shown when signed out.
-  2. **Single Identifier + Password Input**:
-     - The Sign-In form accepts a single identifier field (**Phone Number or Username**) + **Password**.
-     - Upon submission, the auth action checks `public.smart_users` (`smart_authenticate_staff`) and `public.smart_customers` (`smart_authenticate_customer`):
-       - **If matched in `public.smart_users` (`admin`, `merchandising`, `fulfillment`)**: Signs in as Staff and automatically opens the **Dashboard** (`activeTab = "admin"`). While signed in as Staff, a top navigation toggle lets the staff member switch between the Dashboard and the Storefront or Sign Out.
-       - **If matched in `public.smart_customers`**: Signs in as a B2C Customer, merges guest cart/wishlist items, and stays on the customer profile / storefront.
-       - **If neither matches**: Returns a generic *"Invalid login credentials"* message without revealing whether staff usernames exist.
+---
 
+## 3. Completed Ideas
+
+### Phase 9 — Unified Sign-In Flow (Zero Public Admin / Staff References)
+- **Status**: Completed
+- **Summary**:
+  - Removed all public `"Admin"` and `"Staff"` references from `SmartHeader.tsx` and `SmartMeView.tsx`.
+  - Implemented `signInUnified(identifier, password)` in `useSmartAuthStore.ts` checking `public.smart_users` (`smart_authenticate_staff`) and `public.smart_customers` (`smart_authenticate_customer`) behind a single `"Sign In"` modal/card.
+
+### Phase 10 — Unified Full-Width Hero Carousel & Horizontal Category Scrollers
+- **Status**: Completed
+- **Summary**:
+  1. **Top Category Pill Bar (`SmartHeader.tsx`)**: Added dynamic Left (`ChevronLeft`) and Right (`ChevronRight`) smooth-scroll arrow buttons (`±320px`) with soft white edge gradients driven by `canScrollLeft` / `canScrollRight` overflow detection.
+  2. **Unified Single Full-Width Hero Banner Carousel (`SmartHomeView.tsx`)**: Combined the main B's Mart Hero Banner (kept first as Slide 1, plus any `smart_banners` rows) and **all** `campaignTags` (`Best Sellers`, `New Arrivals`, etc.) into a single full-width Hero Banner Carousel with Left/Right navigation arrows, clickable slide indicator dots, and `5000ms` auto-rotation (pausing on hover).
+  3. **Single-Row "Shop by Category" Image Balloons (`SmartHomeView.tsx`)**: Converted the 2-row 20-item slice into a single horizontal line (`flex flex-nowrap overflow-x-auto`) rendering **all** `visibleCategories` with dynamic Left (`ChevronLeft`) and Right (`ChevronRight`) smooth-scroll arrow buttons (`±360px`).

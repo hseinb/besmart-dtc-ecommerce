@@ -46,10 +46,6 @@ export function SplitCategoryExplorer({
   const [categoryItems, setCategoryItems] = useState<ItemWithImages[]>([]);
   const [totalCategoryCount, setTotalCategoryCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [activeSubRoom, setActiveSubRoom] = useState<string | null>(null);
-  const [activeSubMaterial, setActiveSubMaterial] = useState<string | null>(
-    null
-  );
   const [categoryFilterText, setCategoryFilterText] = useState("");
 
   const filteredSidebarCategories = useMemo(() => {
@@ -70,8 +66,6 @@ export function SplitCategoryExplorer({
   // Fetch real items for the selected sidebar category
   useEffect(() => {
     let cancelled = false;
-    setActiveSubRoom(null);
-    setActiveSubMaterial(null);
 
     async function fetchCategoryItems() {
       setIsLoading(true);
@@ -140,56 +134,6 @@ export function SplitCategoryExplorer({
     appSettings.hidden_categories,
     initialItems,
   ]);
-
-  // Extract real Room & Material sub-chips from the loaded category items
-  const { roomChips, materialChips } = useMemo(() => {
-    const rooms = new Set<string>();
-    const materials = new Set<string>();
-
-    for (const item of categoryItems) {
-      if (item.house_rooms) {
-        item.house_rooms
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .forEach((r) => rooms.add(r));
-      }
-      if (item.material) {
-        item.material
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .forEach((m) => materials.add(m));
-      }
-    }
-
-    return {
-      roomChips: Array.from(rooms).slice(0, 10),
-      materialChips: Array.from(materials).slice(0, 10),
-    };
-  }, [categoryItems]);
-
-  const displayedItems = useMemo(() => {
-    return categoryItems.filter((item) => {
-      if (
-        activeSubRoom &&
-        !(item.house_rooms || "")
-          .toLowerCase()
-          .includes(activeSubRoom.toLowerCase())
-      ) {
-        return false;
-      }
-      if (
-        activeSubMaterial &&
-        !(item.material || "")
-          .toLowerCase()
-          .includes(activeSubMaterial.toLowerCase())
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [categoryItems, activeSubRoom, activeSubMaterial]);
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden flex flex-col md:flex-row min-h-[72vh]">
@@ -309,64 +253,6 @@ export function SplitCategoryExplorer({
           </button>
         </div>
 
-        {/* Real Room & Material Sub-Filter Chips extracted from real category items */}
-        {(roomChips.length > 0 || materialChips.length > 0) && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSubRoom(null);
-                  setActiveSubMaterial(null);
-                }}
-                className={`px-3 py-1 rounded-full text-[11px] font-bold transition-colors cursor-pointer ${
-                  !activeSubRoom && !activeSubMaterial
-                    ? "bg-smart-teal text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                All ({categoryItems.length})
-              </button>
-
-              {roomChips.map((room) => (
-                <button
-                  key={`room-${room}`}
-                  type="button"
-                  onClick={() =>
-                    setActiveSubRoom(activeSubRoom === room ? null : room)
-                  }
-                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-colors cursor-pointer ${
-                    activeSubRoom === room
-                      ? "bg-smart-teal text-white"
-                      : "bg-smart-teal-light/60 text-smart-teal hover:bg-smart-teal-light"
-                  }`}
-                >
-                  {room}
-                </button>
-              ))}
-
-              {materialChips.map((mat) => (
-                <button
-                  key={`mat-${mat}`}
-                  type="button"
-                  onClick={() =>
-                    setActiveSubMaterial(
-                      activeSubMaterial === mat ? null : mat
-                    )
-                  }
-                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-colors cursor-pointer ${
-                    activeSubMaterial === mat
-                      ? "bg-slate-900 text-smart-gold"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                  }`}
-                >
-                  {mat}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Right Pane Visual Product Grid */}
         {isLoading ? (
           <div className="py-16 flex flex-col items-center justify-center gap-2 text-smart-teal">
@@ -375,29 +261,17 @@ export function SplitCategoryExplorer({
               Loading category products...
             </span>
           </div>
-        ) : displayedItems.length > 0 ? (
+        ) : categoryItems.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {displayedItems.map((item) => (
+            {categoryItems.map((item) => (
               <SmartProductCard key={item.item_id} item={item} compact />
             ))}
           </div>
         ) : (
           <div className="py-14 text-center space-y-2">
             <p className="text-sm font-bold text-slate-700">
-              No in-stock products match this filter right now.
+              No in-stock products match this category right now.
             </p>
-            {(activeSubRoom || activeSubMaterial) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSubRoom(null);
-                  setActiveSubMaterial(null);
-                }}
-                className="px-4 py-1.5 rounded-xl bg-smart-teal text-white text-xs font-bold cursor-pointer"
-              >
-                Reset Sub-Filters
-              </button>
-            )}
           </div>
         )}
       </div>

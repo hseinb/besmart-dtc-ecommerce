@@ -17,6 +17,8 @@ import {
   Truck,
   Loader2,
   ShieldCheck,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
@@ -60,11 +62,31 @@ export function SmartHeader({
   const [barcodeInput, setBarcodeInput] = useState("");
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const pillScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   const visibleCategories = React.useMemo(() => {
     const hidden = new Set((appSettings.hidden_categories || []).map(Number));
     return categories.filter((c) => !hidden.has(Number(c.item_class_id)));
   }, [categories, appSettings.hidden_categories]);
+
+  const updatePillScrollState = React.useCallback(() => {
+    const el = pillScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    updatePillScrollState();
+    const timer = setTimeout(updatePillScrollState, 100);
+    window.addEventListener("resize", updatePillScrollState);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", updatePillScrollState);
+    };
+  }, [visibleCategories, updatePillScrollState]);
 
   // Close autocomplete dropdown on outside click
   useEffect(() => {
@@ -527,50 +549,92 @@ export function SmartHeader({
 
         {/* SHEIN-Style Horizontal Category & Campaign Ribbon */}
         <div className="border-t border-slate-100 bg-white">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2">
-            <button
-              onClick={() => {
-                setOnSaleOnly(false);
-                navigateToCategory(null);
-              }}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-                selectedClassId === null && !onSaleOnly && activeTab === "home"
-                  ? "bg-smart-teal text-white shadow-xs"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200/70"
-              }`}
-            >
-              All
-            </button>
-
-            <button
-              onClick={navigateToDeals}
-              className={`inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-                activeTab === "deals" || onSaleOnly
-                  ? "bg-smart-sale text-white shadow-xs"
-                  : "bg-smart-sale-light text-smart-sale hover:bg-smart-sale/15"
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>Flash Sale</span>
-            </button>
-
-            {visibleCategories.map((cat) => {
-              const isSelected =
-                selectedClassId === cat.item_class_id && activeTab === "home";
-              return (
+          <div className="relative max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex items-center">
+            {canScrollLeft && (
+              <div className="absolute left-2 sm:left-5 lg:left-7 z-10 flex items-center pr-3 bg-gradient-to-r from-white via-white/95 to-transparent py-1">
                 <button
-                  key={cat.item_class_id}
-                  onClick={() => navigateToCategory(cat.item_class_id)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-                    isSelected
-                      ? "bg-smart-teal text-white shadow-xs"
-                      : "bg-slate-100/90 text-slate-700 hover:bg-smart-teal-light hover:text-smart-teal"
-                  }`}
+                  type="button"
+                  onClick={() =>
+                    pillScrollRef.current?.scrollBy({
+                      left: -320,
+                      behavior: "smooth",
+                    })
+                  }
+                  aria-label="Scroll categories left"
+                  className="w-7 h-7 rounded-full bg-white border border-slate-200 shadow-sm hover:border-smart-teal hover:text-smart-teal text-slate-700 flex items-center justify-center transition-all cursor-pointer active:scale-95"
                 >
-                  {cat.item_class}
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-              );
-            })}
+              </div>
+            )}
+
+            <div
+              ref={pillScrollRef}
+              onScroll={updatePillScrollState}
+              className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-2 scroll-smooth w-full"
+            >
+              <button
+                onClick={() => {
+                  setOnSaleOnly(false);
+                  navigateToCategory(null);
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                  selectedClassId === null && !onSaleOnly && activeTab === "home"
+                    ? "bg-smart-teal text-white shadow-xs"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200/70"
+                }`}
+              >
+                All
+              </button>
+
+              <button
+                onClick={navigateToDeals}
+                className={`inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                  activeTab === "deals" || onSaleOnly
+                    ? "bg-smart-sale text-white shadow-xs"
+                    : "bg-smart-sale-light text-smart-sale hover:bg-smart-sale/15"
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Flash Sale</span>
+              </button>
+
+              {visibleCategories.map((cat) => {
+                const isSelected =
+                  selectedClassId === cat.item_class_id && activeTab === "home";
+                return (
+                  <button
+                    key={cat.item_class_id}
+                    onClick={() => navigateToCategory(cat.item_class_id)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                      isSelected
+                        ? "bg-smart-teal text-white shadow-xs"
+                        : "bg-slate-100/90 text-slate-700 hover:bg-smart-teal-light hover:text-smart-teal"
+                    }`}
+                  >
+                    {cat.item_class}
+                  </button>
+                );
+              })}
+            </div>
+
+            {canScrollRight && (
+              <div className="absolute right-2 sm:right-5 lg:right-7 z-10 flex items-center pl-3 bg-gradient-to-l from-white via-white/95 to-transparent py-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    pillScrollRef.current?.scrollBy({
+                      left: 320,
+                      behavior: "smooth",
+                    })
+                  }
+                  aria-label="Scroll categories right"
+                  className="w-7 h-7 rounded-full bg-white border border-slate-200 shadow-sm hover:border-smart-teal hover:text-smart-teal text-slate-700 flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>

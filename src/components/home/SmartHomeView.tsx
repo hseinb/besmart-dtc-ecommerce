@@ -6,6 +6,7 @@ import {
   Sparkles,
   TicketPercent,
   Check,
+  ChevronLeft,
   ChevronRight,
   LayoutGrid,
   RotateCcw,
@@ -83,6 +84,7 @@ export function SmartHomeView({
   const [flashDeals, setFlashDeals] =
     useState<ItemWithImages[]>(initialFlashDeals);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [isHeroPaused, setIsHeroPaused] = useState(false);
   const [countdownText, setCountdownText] = useState<string | null>(null);
   const [clientCategoryThumbs, setClientCategoryThumbs] = useState<
     Record<number, string>
@@ -92,6 +94,48 @@ export function SmartHomeView({
   );
 
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
+  const catScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollCatLeft, setCanScrollCatLeft] = useState(false);
+  const [canScrollCatRight, setCanScrollCatRight] = useState(false);
+
+  // Unified full-width hero carousel slides: Slide 1 = Main B's Mart Hero (+ any smart_banners), followed by all campaignTags
+  const heroSlides = React.useMemo(() => {
+    type HeroSlide =
+      | {
+          id: string;
+          kind: "main";
+          banner?: SmartBanner;
+        }
+      | {
+          id: string;
+          kind: "tag";
+          tag: ItemTag;
+        };
+
+    const slides: HeroSlide[] = [];
+    if (banners.length > 0) {
+      for (const b of banners) {
+        slides.push({ id: `banner-${b.id}`, kind: "main", banner: b });
+      }
+    } else {
+      slides.push({ id: "main-bsmart-hero", kind: "main" });
+    }
+
+    for (const tag of campaignTags) {
+      slides.push({ id: `tag-${tag.id}`, kind: "tag", tag });
+    }
+
+    return slides;
+  }, [banners, campaignTags]);
+
+  // Auto-rotate Hero Carousel every 5000ms (pauses on hover)
+  useEffect(() => {
+    if (heroSlides.length <= 1 || isHeroPaused) return;
+    const timer = setInterval(() => {
+      setActiveSlideIndex((prev) => (prev + 1) % heroSlides.length);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [heroSlides.length, isHeroPaused]);
 
   // Hydrate category thumbnails & active category counts on client via RPC if needed
   useEffect(() => {
@@ -155,6 +199,23 @@ export function SmartHomeView({
     }
     return nonHidden;
   }, [categories, appSettings.hidden_categories, activeClassIdSet]);
+
+  const updateCatScrollState = useCallback(() => {
+    const el = catScrollRef.current;
+    if (!el) return;
+    setCanScrollCatLeft(el.scrollLeft > 4);
+    setCanScrollCatRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    updateCatScrollState();
+    const timer = setTimeout(updateCatScrollState, 120);
+    window.addEventListener("resize", updateCatScrollState);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", updateCatScrollState);
+    };
+  }, [visibleCategories, updateCatScrollState]);
 
   // Map a representative thumbnail per category (seeded from smart_get_category_thumbnails RPC + fallback to loaded items)
   const categoryThumbMap = React.useMemo(() => {
@@ -537,100 +598,209 @@ export function SmartHomeView({
         </section>
       )}
 
-      {/* 2. Hero Campaign Carousel & Real Tag Spotlights (When not filtering) */}
-      {!hasActiveFilters && (
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
-          {/* Main Brand & Campaign Hero Banner */}
-          <div className="lg:col-span-8 rounded-3xl bg-gradient-to-br from-smart-teal-deep via-smart-teal to-[#0077A8] text-white p-5 sm:p-7 shadow-lg relative overflow-hidden flex flex-col justify-between min-h-[210px] sm:min-h-[240px]">
-            <div className="relative z-10 space-y-2.5 max-w-xl">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-xs text-smart-gold text-[11px] font-extrabold uppercase tracking-wider">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>B&apos;s Mart • Smart Home &amp; Lifestyle</span>
-              </div>
-              <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
-                {banners[activeSlideIndex]?.title || (
-                  <>
-                    Everyday Smart Finds,{" "}
-                    <span className="text-smart-gold">Unbeatable Retail Prices.</span>
-                  </>
-                )}
-              </h1>
-              <p className="text-xs sm:text-sm text-white/85 font-medium leading-relaxed max-w-lg">
-                {banners[activeSlideIndex]?.subtitle ||
-                  `Shop ${totalCatalogCount.toLocaleString()} real in-stock home, kitchen, cleaning, and lifestyle essentials with fast delivery across Lebanon.`}
-              </p>
-            </div>
+      {/* 2. Unified Single Full-Width Hero Banner Carousel (Main B's Mart Hero + All Campaign Tags) */}
+      {!hasActiveFilters && heroSlides.length > 0 && (
+        <section
+          onMouseEnter={() => setIsHeroPaused(true)}
+          onMouseLeave={() => setIsHeroPaused(false)}
+          className="rounded-3xl overflow-hidden shadow-lg relative min-h-[210px] sm:min-h-[250px] bg-gradient-to-br from-smart-teal-deep via-smart-teal to-[#0077A8] text-white"
+        >
+          {(() => {
+            const safeIdx = activeSlideIndex % heroSlides.length;
+            const currentSlide = heroSlides[safeIdx] || heroSlides[0];
 
-            <div className="relative z-10 flex flex-wrap items-center gap-2.5 pt-4">
-              <button
-                type="button"
-                onClick={() => setActiveTab("categories")}
-                className="px-4 py-2.5 rounded-2xl bg-smart-gold hover:bg-smart-gold-hover text-slate-950 text-xs sm:text-sm font-black shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
-              >
-                <LayoutGrid className="w-4 h-4" />
-                <span>Browse All Categories</span>
-              </button>
-              {flashDeals.length > 0 && (
-                <button
-                  type="button"
-                  onClick={navigateToDeals}
-                  className="px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            if (currentSlide.kind === "main") {
+              const b = currentSlide.banner;
+              return (
+                <div
+                  key={currentSlide.id}
+                  className="relative w-full min-h-[210px] sm:min-h-[250px] p-5 sm:p-8 flex flex-col justify-between overflow-hidden"
                 >
-                  <Zap className="w-4 h-4 text-smart-gold fill-smart-gold" />
-                  <span>Shop Flash Sale ({flashDeals.length}+ Deals)</span>
-                </button>
-              )}
-            </div>
+                  {b?.image_url && (
+                    <>
+                      <img
+                        src={b.image_url}
+                        alt={b.title}
+                        className="absolute inset-0 w-full h-full object-cover opacity-35 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-r from-smart-teal-deep/95 via-smart-teal-deep/75 to-transparent" />
+                    </>
+                  )}
 
-            {/* Subtle Decorative Brand Ring */}
-            <div className="absolute -right-12 -bottom-12 w-56 h-56 rounded-full bg-smart-gold/15 blur-2xl pointer-events-none" />
-          </div>
+                  <div className="relative z-10 space-y-2.5 max-w-2xl">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-xs text-smart-gold text-[11px] font-extrabold uppercase tracking-wider">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>
+                        {b?.badge_text ||
+                          "B's Mart • Smart Home & Lifestyle"}
+                      </span>
+                    </div>
+                    <h1 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight">
+                      {b?.title || (
+                        <>
+                          Everyday Smart Finds,{" "}
+                          <span className="text-smart-gold">
+                            Unbeatable Retail Prices.
+                          </span>
+                        </>
+                      )}
+                    </h1>
+                    <p className="text-xs sm:text-sm text-white/85 font-medium leading-relaxed max-w-xl">
+                      {b?.subtitle ||
+                        `Shop ${totalCatalogCount.toLocaleString()} real in-stock home, kitchen, cleaning, and lifestyle essentials with fast delivery across Lebanon.`}
+                    </p>
+                  </div>
 
-          {/* Right Column: Real Campaign Tags from public.item_tags */}
-          <div className="lg:col-span-4 grid grid-cols-2 lg:grid-cols-1 gap-2.5">
-            {campaignTags.slice(0, 2).map((tag) => (
-              <button
-                key={tag.id}
-                type="button"
-                onClick={() => {
-                  if (tag.tag_name.toLowerCase() === "on sale") {
-                    navigateToDeals();
-                  } else {
-                    setSelectedTag(tag.tag_name);
-                  }
-                }}
-                className="group relative rounded-2xl overflow-hidden border border-slate-200/80 bg-slate-900 text-white p-4 flex flex-col justify-end min-h-[108px] text-left shadow-xs hover:shadow-md transition-all cursor-pointer"
+                  <div className="relative z-10 flex flex-wrap items-center gap-2.5 pt-4 pb-3 sm:pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("categories")}
+                      className="px-4 py-2.5 rounded-2xl bg-smart-gold hover:bg-smart-gold-hover text-slate-950 text-xs sm:text-sm font-black shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <LayoutGrid className="w-4 h-4" />
+                      <span>Browse All Categories</span>
+                    </button>
+                    {flashDeals.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={navigateToDeals}
+                        className="px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Zap className="w-4 h-4 text-smart-gold fill-smart-gold" />
+                        <span>Shop Flash Sale ({flashDeals.length}+ Deals)</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Subtle Decorative Brand Ring */}
+                  <div className="absolute -right-12 -bottom-12 w-56 h-56 rounded-full bg-smart-gold/15 blur-2xl pointer-events-none" />
+                </div>
+              );
+            }
+
+            const tag = currentSlide.tag;
+            return (
+              <div
+                key={currentSlide.id}
+                className="relative w-full min-h-[210px] sm:min-h-[250px] p-5 sm:p-8 flex flex-col justify-between overflow-hidden bg-slate-950"
               >
                 {tag.image_url && (
                   <img
                     src={tag.image_url}
                     alt={tag.title || tag.tag_name}
                     loading="lazy"
-                    className="absolute inset-0 w-full h-full object-cover opacity-55 group-hover:scale-105 transition-transform duration-300"
+                    className="absolute inset-0 w-full h-full object-cover opacity-60 transition-transform duration-500"
                   />
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent" />
-                <div className="relative z-10">
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-smart-gold text-slate-950 text-[10px] font-black uppercase tracking-wider">
-                    <Tag className="w-2.5 h-2.5" />
-                    {tag.tag_name}
-                  </span>
-                  <h3 className="text-sm sm:text-base font-black text-white mt-1 leading-tight">
+                <div className="absolute inset-0 bg-gradient-to-r from-slate-950/95 via-smart-teal-deep/80 to-slate-950/35" />
+
+                <div className="relative z-10 space-y-2.5 max-w-2xl">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-smart-gold text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-xs">
+                    <Tag className="w-3.5 h-3.5" />
+                    <span>{tag.tag_name}</span>
+                  </div>
+                  <h2 className="text-2xl sm:text-4xl font-black tracking-tight leading-tight text-white">
                     {tag.title || tag.tag_name}
-                  </h3>
+                  </h2>
                   {tag.description && (
-                    <p className="text-[11px] text-white/80 line-clamp-1">
+                    <p className="text-xs sm:text-sm text-white/85 font-medium leading-relaxed max-w-xl line-clamp-2">
                       {tag.description}
                     </p>
                   )}
                 </div>
+
+                <div className="relative z-10 flex flex-wrap items-center gap-2.5 pt-4 pb-3 sm:pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (tag.tag_name.toLowerCase() === "on sale") {
+                        navigateToDeals();
+                      } else {
+                        setSelectedTag(tag.tag_name);
+                      }
+                    }}
+                    className="px-4 py-2.5 rounded-2xl bg-smart-gold hover:bg-smart-gold-hover text-slate-950 text-xs sm:text-sm font-black shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Explore {tag.title || tag.tag_name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("categories")}
+                    className="px-4 py-2.5 rounded-2xl bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <LayoutGrid className="w-4 h-4" />
+                    <span>Browse All Categories</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Left / Right Carousel Navigation Arrows */}
+          {heroSlides.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveSlideIndex(
+                    (prev) => (prev - 1 + heroSlides.length) % heroSlides.length
+                  )
+                }
+                aria-label="Previous slide"
+                className="
+                  absolute left-2.5 sm:left-4 top-1/2 -translate-y-1/2 z-20
+                  w-8 h-8 sm:w-9 sm:h-9 rounded-full
+                  bg-slate-950/45 hover:bg-slate-950/75 text-white border border-white/25
+                  backdrop-blur-xs shadow-md flex items-center justify-center
+                  transition-all cursor-pointer active:scale-95
+                "
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
-            ))}
-          </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveSlideIndex((prev) => (prev + 1) % heroSlides.length)
+                }
+                aria-label="Next slide"
+                className="
+                  absolute right-2.5 sm:right-4 top-1/2 -translate-y-1/2 z-20
+                  w-8 h-8 sm:w-9 sm:h-9 rounded-full
+                  bg-slate-950/45 hover:bg-slate-950/75 text-white border border-white/25
+                  backdrop-blur-xs shadow-md flex items-center justify-center
+                  transition-all cursor-pointer active:scale-95
+                "
+              >
+                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              {/* Clickable Slide Indicator Dots */}
+              <div className="absolute bottom-3 right-4 sm:right-7 z-20 flex items-center gap-1.5 bg-slate-950/35 backdrop-blur-xs px-2.5 py-1 rounded-full border border-white/15">
+                {heroSlides.map((slide, idx) => {
+                  const isCurrent =
+                    idx === activeSlideIndex % heroSlides.length;
+                  return (
+                    <button
+                      key={slide.id}
+                      type="button"
+                      onClick={() => setActiveSlideIndex(idx)}
+                      aria-label={`Go to slide ${idx + 1}`}
+                      className={`h-2 rounded-full transition-all cursor-pointer ${
+                        isCurrent
+                          ? "w-6 bg-smart-gold"
+                          : "w-2 bg-white/55 hover:bg-white/90"
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            </>
+          )}
         </section>
       )}
 
-      {/* 3. SHEIN-Style Circular Category Bubbles Grid */}
+      {/* 3. Single-Row Circular Category Bubbles with Left/Right Scroll Arrows */}
       {!hasActiveFilters && visibleCategories.length > 0 && (
         <section className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
@@ -650,43 +820,85 @@ export function SmartHomeView({
             </button>
           </div>
 
-          <div className="grid grid-rows-2 grid-flow-col auto-cols-[78px] sm:auto-cols-[92px] gap-x-3 gap-y-3.5 overflow-x-auto no-scrollbar py-1">
-            {visibleCategories.slice(0, 20).map((cat) => {
-              const thumbUrl = categoryThumbMap.get(cat.item_class_id);
-              const initials = cat.item_class
-                .split(/[\s&-]+/)
-                .filter(Boolean)
-                .slice(0, 2)
-                .map((w) => w[0]?.toUpperCase())
-                .join("");
-
-              return (
+          <div className="relative flex items-center">
+            {canScrollCatLeft && (
+              <div className="absolute left-0 z-10 flex items-center pr-3 bg-gradient-to-r from-white via-white/95 to-transparent py-2">
                 <button
-                  key={cat.item_class_id}
                   type="button"
-                  onClick={() => navigateToCategory(cat.item_class_id)}
-                  className="group flex flex-col items-center text-center gap-1.5 cursor-pointer"
+                  onClick={() =>
+                    catScrollRef.current?.scrollBy({
+                      left: -360,
+                      behavior: "smooth",
+                    })
+                  }
+                  aria-label="Scroll categories left"
+                  className="w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md hover:border-smart-teal hover:text-smart-teal text-slate-700 flex items-center justify-center transition-all cursor-pointer active:scale-95"
                 >
-                  <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-slate-100 border-2 border-slate-200/90 group-hover:border-smart-teal overflow-hidden shadow-2xs flex items-center justify-center transition-all group-hover:scale-105">
-                    {thumbUrl ? (
-                      <img
-                        src={thumbUrl}
-                        alt={cat.item_class}
-                        loading="lazy"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-xs sm:text-sm font-black text-smart-teal">
-                        {initials || "BM"}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[11px] font-bold text-slate-700 group-hover:text-smart-teal line-clamp-2 leading-tight">
-                    {cat.item_class}
-                  </span>
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-              );
-            })}
+              </div>
+            )}
+
+            <div
+              ref={catScrollRef}
+              onScroll={updateCatScrollState}
+              className="flex flex-nowrap items-start gap-3.5 sm:gap-4 overflow-x-auto no-scrollbar py-1.5 scroll-smooth w-full"
+            >
+              {visibleCategories.map((cat) => {
+                const thumbUrl = categoryThumbMap.get(cat.item_class_id);
+                const initials = cat.item_class
+                  .split(/[\s&-]+/)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((w) => w[0]?.toUpperCase())
+                  .join("");
+
+                return (
+                  <button
+                    key={cat.item_class_id}
+                    type="button"
+                    onClick={() => navigateToCategory(cat.item_class_id)}
+                    className="group flex flex-col items-center text-center gap-1.5 cursor-pointer shrink-0 w-[78px] sm:w-[92px]"
+                  >
+                    <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-slate-100 border-2 border-slate-200/90 group-hover:border-smart-teal overflow-hidden shadow-2xs flex items-center justify-center transition-all group-hover:scale-105">
+                      {thumbUrl ? (
+                        <img
+                          src={thumbUrl}
+                          alt={cat.item_class}
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-xs sm:text-sm font-black text-smart-teal">
+                          {initials || "BM"}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 group-hover:text-smart-teal line-clamp-2 leading-tight">
+                      {cat.item_class}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {canScrollCatRight && (
+              <div className="absolute right-0 z-10 flex items-center pl-3 bg-gradient-to-l from-white via-white/95 to-transparent py-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    catScrollRef.current?.scrollBy({
+                      left: 360,
+                      behavior: "smooth",
+                    })
+                  }
+                  aria-label="Scroll categories right"
+                  className="w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md hover:border-smart-teal hover:text-smart-teal text-slate-700 flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -806,24 +1018,12 @@ export function SmartHomeView({
           </div>
         </div>
 
-        {/* Active Sub-Filter Chips (Room, Material, Tag) */}
-        {(selectedRoom || selectedMaterial || selectedTag) && (
+        {/* Active Campaign Tag Chip */}
+        {selectedTag && (
           <div className="flex items-center gap-2 flex-wrap px-1">
-            {selectedRoom && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-smart-teal-light text-smart-teal text-xs font-bold">
-                Room: {selectedRoom}
-              </span>
-            )}
-            {selectedMaterial && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-smart-teal-light text-smart-teal text-xs font-bold">
-                Material: {selectedMaterial}
-              </span>
-            )}
-            {selectedTag && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-bold">
-                Tag: {selectedTag}
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-bold">
+              Tag: {selectedTag}
+            </span>
           </div>
         )}
 
