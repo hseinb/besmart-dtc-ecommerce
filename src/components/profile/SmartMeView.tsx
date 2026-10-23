@@ -60,10 +60,8 @@ export function SmartMeView({
     isLoadingOrders,
     hydrate: hydrateAuth,
     signInUnified,
-    signInCustomerWithPassword,
-    registerCustomerWithPassword,
-    requestPhoneOtp,
-    verifyPhoneOtp,
+    sendPhoneOtp,
+    verifySmsOtpAndAuth,
     addAddress,
     deleteAddress,
     setDefaultAddress,
@@ -85,21 +83,19 @@ export function SmartMeView({
   const [activeTrackedOrder, setActiveTrackedOrder] =
     useState<SmartOrder | null>(null);
 
-  // Customer Auth Modal State (Sign In | Sign Up | OTP)
+  // Customer Auth Modal State (Sign In | Create Account + RetailSMS OTP)
   const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"signin" | "signup" | "otp">("signin");
-  const [otpStep, setOtpStep] = useState<"phone" | "code">("phone");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [signInSubMode, setSignInSubMode] = useState<
+    "password" | "otp_login" | "reset_password"
+  >("password");
+  const [otpStep, setOtpStep] = useState<"request" | "verify">("request");
   const [authPhone, setAuthPhone] = useState("");
   const [authName, setAuthName] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authEmail, setAuthEmail] = useState("");
-  const [authChannel, setAuthChannel] = useState<"whatsapp" | "sms">(
-    "whatsapp"
-  );
   const [otpCodeInput, setOtpCodeInput] = useState("");
-  const [bridgeFallbackCode, setBridgeFallbackCode] = useState<
-    string | undefined
-  >(undefined);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Guest Order Lookup State
@@ -129,6 +125,15 @@ export function SmartMeView({
     hydrateAuth();
     setLocalDeviceOrders(loadLocalSavedOrders());
   }, [hydrateAuth]);
+
+  // 1-second countdown timer for SMS OTP resend cooldown
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
 
   // Realtime subscription to update orders list live when smartBridge.js updates status
   useEffect(() => {
@@ -219,47 +224,87 @@ export function SmartMeView({
     }
   };
 
-  const handlePasswordSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRequestSmsOtp = async (
+    purpose: "signup" | "login" | "reset_password",
+    e?: React.FormEvent
+  ) => {
+    if (e) e.preventDefault();
     setAuthError(null);
-    const res = await registerCustomerWithPassword(
-      authPhone,
-      authName,
-      authPassword,
-      authEmail
-    );
-    if (!res.success) {
-      setAuthError(res.errorMessage || "Registration failed.");
-      return;
-    }
-    setIsOtpModalOpen(false);
-    setAuthPassword("");
-  };
 
-  const handleRequestOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    const res = await requestPhoneOtp(authPhone, authName, authChannel);
-    if (!res.success) {
-      setAuthError(res.errorMessage || "Could not send verification code.");
-      return;
+    if (purpose === "signup") {
+      if (!authName.trim()) {
+        setAuthError("Please enter your full name.");
+        return;
+      }
+      if (!authPhone.trim()) {
+        setAuthError("Please enter your Lebanon mobile phone number.");
+        return;
+      }
+      if (!authPassword || authPassword.length < 6) {
+        setAuthError("Password must be at least 6 characters.");
+        return;
+      }
+    } else {
+      if (!authPhone.trim()) {
+        setAuthError("Please enter your Lebanon mobile phone number.");
+        return;
+      }
     }
-    setBridgeFallbackCode(res.fallbackCode);
-    setOtpStep("code");
-  };
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    const res = await verifyPhoneOtp(authPhone, otpCodeInput, authName);
+    const res = await sendPhoneOtp(authPhone, purpose);
     if (!res.success) {
-      setAuthError(res.errorMessage || "Invalid verification code.");
+      if (res.retryAfterSeconds && res.retryAfterSeconds > 0) {
+        setResendCooldown(res.retryAfterSeconds);
+      }
+      setAuthError(res.error || "Could not send SMS verification code.");
       return;
     }
-    setIsOtpModalOpen(false);
-    setOtpStep("phone");
+
+    setResendCooldown(res.cooldownSeconds || 60);
     setOtpCodeInput("");
-    setBridgeFallbackCode(undefined);
+    setOtpStep("verify");
+  };
+
+  const handleVerifySmsOtp = async (
+    purpose: "signup" | "login" | "reset_password",
+    e: React.FormEvent
+  ) => {
+    e.preventDefault();
+    setAuthError(null);
+
+    const cleanCode = otpCodeInput.replace(/[^0-9]/g, "");
+    if (cleanCode.length !== 6) {
+      setAuthError("Please enter the 6-digit SMS verification code.");
+      return;
+    }
+
+    if (purpose === "reset_password" && (!authPassword || authPassword.length < 6)) {
+      setAuthError("New password must be at least 6 characters.");
+      return;
+    }
+
+    const res = await verifySmsOtpAndAuth({
+      phone: authPhone,
+      code: cleanCode,
+      purpose,
+      fullName: purpose === "signup" ? authName : undefined,
+      password:
+        purpose === "signup" || purpose === "reset_password"
+          ? authPassword
+          : undefined,
+      email: purpose === "signup" ? authEmail : undefined,
+    });
+
+    if (!res.success) {
+      setAuthError(res.error || "Invalid or expired verification code.");
+      return;
+    }
+
+    setIsOtpModalOpen(false);
+    setOtpStep("request");
+    setSignInSubMode("password");
+    setOtpCodeInput("");
+    setAuthPassword("");
   };
 
   const handleGuestLookup = async (e: React.FormEvent) => {
@@ -310,6 +355,25 @@ export function SmartMeView({
     }
   };
 
+  const getAuthCardHeading = () => {
+    if (authMode === "signup") {
+      return otpStep === "verify"
+        ? "Verify Mobile Number"
+        : "Create Account";
+    }
+    if (signInSubMode === "otp_login") {
+      return otpStep === "verify"
+        ? "Enter SMS Code"
+        : "Sign In with SMS Code";
+    }
+    if (signInSubMode === "reset_password") {
+      return otpStep === "verify"
+        ? "Reset Your Password"
+        : "Forgot Password";
+    }
+    return "Sign In";
+  };
+
   const renderAuthCard = (isModal: boolean) => (
     <div
       onClick={isModal ? (e) => e.stopPropagation() : undefined}
@@ -328,13 +392,7 @@ export function SmartMeView({
           />
           <div>
             <h3 className="text-base font-black text-slate-900">
-              {authMode === "signin"
-                ? "Sign In"
-                : authMode === "signup"
-                ? "Create Account"
-                : otpStep === "phone"
-                ? "Passwordless OTP Sign In"
-                : "Enter Verification Code"}
+              {getAuthCardHeading()}
             </h3>
             <p className="text-xs text-slate-500">
               Sync your orders, wishlist &amp; delivery addresses
@@ -352,13 +410,16 @@ export function SmartMeView({
         )}
       </div>
 
-      {/* 3 Auth Mode Tabs */}
-      <div className="grid grid-cols-3 gap-1.5 p-1 rounded-2xl bg-slate-100 text-xs font-extrabold">
+      {/* Clean 2-Tab Auth Switcher (Sign In | Create Account) */}
+      <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-slate-100 text-xs font-extrabold">
         <button
           type="button"
           onClick={() => {
             setAuthError(null);
             setAuthMode("signin");
+            setSignInSubMode("password");
+            setOtpStep("request");
+            setOtpCodeInput("");
           }}
           className={`py-2 rounded-xl transition-all cursor-pointer ${
             authMode === "signin"
@@ -373,6 +434,8 @@ export function SmartMeView({
           onClick={() => {
             setAuthError(null);
             setAuthMode("signup");
+            setOtpStep("request");
+            setOtpCodeInput("");
           }}
           className={`py-2 rounded-xl transition-all cursor-pointer ${
             authMode === "signup"
@@ -381,21 +444,6 @@ export function SmartMeView({
           }`}
         >
           Create Account
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setAuthError(null);
-            setAuthMode("otp");
-            setOtpStep("phone");
-          }}
-          className={`py-2 rounded-xl transition-all cursor-pointer ${
-            authMode === "otp"
-              ? "bg-white text-smart-teal shadow-xs"
-              : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          WhatsApp OTP
         </button>
       </div>
 
@@ -406,52 +454,379 @@ export function SmartMeView({
       )}
 
       {authMode === "signin" ? (
-        <form onSubmit={handlePasswordSignIn} className="space-y-3.5">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Phone Number or Username
-            </label>
-            <input
-              type="text"
-              required
-              value={authPhone}
-              onChange={(e) => setAuthPhone(e.target.value)}
-              placeholder="Enter phone number or username"
-              className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
-            />
-          </div>
+        signInSubMode === "password" ? (
+          <form onSubmit={handlePasswordSignIn} className="space-y-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Phone Number or Username
+              </label>
+              <input
+                type="text"
+                required
+                value={authPhone}
+                onChange={(e) => setAuthPhone(e.target.value)}
+                placeholder="Enter phone number or username"
+                className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
+              />
+            </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Password
-            </label>
-            <input
-              type="password"
-              required
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
-            />
-          </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-700">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthError(null);
+                    setSignInSubMode("reset_password");
+                    setOtpStep("request");
+                    setOtpCodeInput("");
+                    setAuthPassword("");
+                  }}
+                  className="text-xs font-bold text-smart-teal hover:underline cursor-pointer"
+                >
+                  Forgot Password?
+                </button>
+              </div>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={isLoadingAuth}
-            className="w-full h-11 rounded-2xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            <button
+              type="submit"
+              disabled={isLoadingAuth}
+              className="w-full h-11 rounded-2xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {isLoadingAuth ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Signing In...</span>
+                </>
+              ) : (
+                <span>Sign In</span>
+              )}
+            </button>
+
+            <div className="pt-1 flex items-center justify-between text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError(null);
+                  setSignInSubMode("otp_login");
+                  setOtpStep("request");
+                  setOtpCodeInput("");
+                }}
+                className="inline-flex items-center gap-1.5 text-smart-teal hover:underline cursor-pointer"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>Sign in with SMS Code</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError(null);
+                  setSignInSubMode("reset_password");
+                  setOtpStep("request");
+                  setOtpCodeInput("");
+                  setAuthPassword("");
+                }}
+                className="text-slate-500 hover:text-slate-800 hover:underline cursor-pointer"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          </form>
+        ) : signInSubMode === "otp_login" ? (
+          otpStep === "request" ? (
+            <form
+              onSubmit={(e) => handleRequestSmsOtp("login", e)}
+              className="space-y-3.5"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Mobile Phone Number (Lebanon)
+                </label>
+                <input
+                  type="tel"
+                  required
+                  value={authPhone}
+                  onChange={(e) => setAuthPhone(e.target.value)}
+                  placeholder="e.g. 03 123 456 or +961 70..."
+                  className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoadingAuth}
+                className="w-full h-11 rounded-2xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isLoadingAuth ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Sending SMS Code...</span>
+                  </>
+                ) : (
+                  <>
+                    <Smartphone className="w-4 h-4" />
+                    <span>Send SMS Code</span>
+                  </>
+                )}
+              </button>
+
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthError(null);
+                    setSignInSubMode("password");
+                    setOtpStep("request");
+                    setOtpCodeInput("");
+                  }}
+                  className="text-xs font-bold text-slate-500 hover:text-slate-900 hover:underline cursor-pointer"
+                >
+                  Back to Password Sign In
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form
+              onSubmit={(e) => handleVerifySmsOtp("login", e)}
+              className="space-y-4"
+            >
+              <div className="p-3 rounded-2xl bg-smart-teal-light/60 border border-smart-teal/20 text-xs text-slate-700">
+                We sent a 6-digit SMS verification code to{" "}
+                <span className="font-mono font-black text-slate-900">
+                  {authPhone}
+                </span>
+                . Enter it below to sign in.
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  6-Digit SMS Verification Code
+                </label>
+                <input
+                  type="text"
+                  required
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={otpCodeInput}
+                  onChange={(e) =>
+                    setOtpCodeInput(e.target.value.replace(/[^0-9]/g, ""))
+                  }
+                  placeholder="123456"
+                  className="w-full h-12 px-4 rounded-xl border border-slate-200 text-center font-mono text-lg font-black tracking-widest focus:outline-none focus:ring-2 focus:ring-smart-teal"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoadingAuth}
+                className="w-full h-11 rounded-2xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isLoadingAuth ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <span>Verify &amp; Sign In</span>
+                )}
+              </button>
+
+              <div className="flex items-center justify-between text-xs font-bold pt-1">
+                <button
+                  type="button"
+                  disabled={resendCooldown > 0 || isLoadingAuth}
+                  onClick={() => handleRequestSmsOtp("login")}
+                  className={`cursor-pointer ${
+                    resendCooldown > 0
+                      ? "text-slate-400 cursor-not-allowed"
+                      : "text-smart-teal hover:underline"
+                  }`}
+                >
+                  {resendCooldown > 0
+                    ? `Resend code in ${resendCooldown}s`
+                    : "Resend SMS Code"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthError(null);
+                    setSignInSubMode("password");
+                    setOtpStep("request");
+                    setOtpCodeInput("");
+                  }}
+                  className="text-slate-500 hover:text-slate-900 hover:underline cursor-pointer"
+                >
+                  Back to Password Sign In
+                </button>
+              </div>
+            </form>
+          )
+        ) : otpStep === "request" ? (
+          <form
+            onSubmit={(e) => handleRequestSmsOtp("reset_password", e)}
+            className="space-y-3.5"
           >
-            {isLoadingAuth ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Signing In...</span>
-              </>
-            ) : (
-              <span>Sign In</span>
-            )}
-          </button>
-        </form>
-      ) : authMode === "signup" ? (
-        <form onSubmit={handlePasswordSignUp} className="space-y-3.5">
+            <p className="text-xs text-slate-600">
+              Enter your registered Lebanon mobile phone number and we&apos;ll
+              send you a 6-digit SMS code to reset your password.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Mobile Phone Number (Lebanon)
+              </label>
+              <input
+                type="tel"
+                required
+                value={authPhone}
+                onChange={(e) => setAuthPhone(e.target.value)}
+                placeholder="e.g. 03 123 456 or +961 70..."
+                className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoadingAuth}
+              className="w-full h-11 rounded-2xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {isLoadingAuth ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Sending Reset Code...</span>
+                </>
+              ) : (
+                <span>Send Password Reset Code</span>
+              )}
+            </button>
+
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError(null);
+                  setSignInSubMode("password");
+                  setOtpStep("request");
+                  setOtpCodeInput("");
+                }}
+                className="text-xs font-bold text-slate-500 hover:text-slate-900 hover:underline cursor-pointer"
+              >
+                Back to Password Sign In
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form
+            onSubmit={(e) => handleVerifySmsOtp("reset_password", e)}
+            className="space-y-3.5"
+          >
+            <div className="p-3 rounded-2xl bg-smart-teal-light/60 border border-smart-teal/20 text-xs text-slate-700">
+              We sent a 6-digit password reset code to{" "}
+              <span className="font-mono font-black text-slate-900">
+                {authPhone}
+              </span>
+              .
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                6-Digit SMS Verification Code
+              </label>
+              <input
+                type="text"
+                required
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={otpCodeInput}
+                onChange={(e) =>
+                  setOtpCodeInput(e.target.value.replace(/[^0-9]/g, ""))
+                }
+                placeholder="123456"
+                className="w-full h-12 px-4 rounded-xl border border-slate-200 text-center font-mono text-lg font-black tracking-widest focus:outline-none focus:ring-2 focus:ring-smart-teal"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                New Password (min. 6 characters) *
+              </label>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoadingAuth}
+              className="w-full h-11 rounded-2xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {isLoadingAuth ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Updating Password...</span>
+                </>
+              ) : (
+                <span>Verify &amp; Update Password</span>
+              )}
+            </button>
+
+            <div className="flex items-center justify-between text-xs font-bold pt-1">
+              <button
+                type="button"
+                disabled={resendCooldown > 0 || isLoadingAuth}
+                onClick={() => handleRequestSmsOtp("reset_password")}
+                className={`cursor-pointer ${
+                  resendCooldown > 0
+                    ? "text-slate-400 cursor-not-allowed"
+                    : "text-smart-teal hover:underline"
+                }`}
+              >
+                {resendCooldown > 0
+                  ? `Resend code in ${resendCooldown}s`
+                  : "Resend SMS Code"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError(null);
+                  setSignInSubMode("password");
+                  setOtpStep("request");
+                  setOtpCodeInput("");
+                }}
+                className="text-slate-500 hover:text-slate-900 hover:underline cursor-pointer"
+              >
+                Back to Password Sign In
+              </button>
+            </div>
+          </form>
+        )
+      ) : otpStep === "request" ? (
+        <form
+          onSubmit={(e) => handleRequestSmsOtp("signup", e)}
+          className="space-y-3.5"
+        >
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Full Name *
@@ -516,73 +891,46 @@ export function SmartMeView({
             {isLoadingAuth ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Creating Account...</span>
+                <span>Sending Verification Code...</span>
               </>
             ) : (
-              <span>Create My B&apos;s Mart Account</span>
+              <>
+                <Smartphone className="w-4 h-4" />
+                <span>Send SMS Verification Code</span>
+              </>
             )}
           </button>
         </form>
-      ) : otpStep === "phone" ? (
-        <form onSubmit={handleRequestOtp} className="space-y-3.5">
+      ) : (
+        <form
+          onSubmit={(e) => handleVerifySmsOtp("signup", e)}
+          className="space-y-4"
+        >
+          <div className="p-3 rounded-2xl bg-smart-teal-light/60 border border-smart-teal/20 text-xs text-slate-700">
+            We sent a 6-digit SMS verification code to{" "}
+            <span className="font-mono font-black text-slate-900">
+              {authPhone}
+            </span>
+            . Enter it below to complete your account.
+          </div>
+
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              Your Name
+              6-Digit SMS Code
             </label>
             <input
               type="text"
               required
-              value={authName}
-              onChange={(e) => setAuthName(e.target.value)}
-              placeholder="e.g. Nadine Karam"
-              className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otpCodeInput}
+              onChange={(e) =>
+                setOtpCodeInput(e.target.value.replace(/[^0-9]/g, ""))
+              }
+              placeholder="123456"
+              className="w-full h-12 px-4 rounded-xl border border-slate-200 text-center font-mono text-lg font-black tracking-widest focus:outline-none focus:ring-2 focus:ring-smart-teal"
             />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Mobile Phone Number (Lebanon)
-            </label>
-            <input
-              type="tel"
-              required
-              value={authPhone}
-              onChange={(e) => setAuthPhone(e.target.value)}
-              placeholder="e.g. 03 123 456 or +961 70..."
-              className="w-full h-11 px-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-smart-teal"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Receive Code Via
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setAuthChannel("whatsapp")}
-                className={`h-10 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
-                  authChannel === "whatsapp"
-                    ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-                    : "border-slate-200 text-slate-600"
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>WhatsApp</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAuthChannel("sms")}
-                className={`h-10 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
-                  authChannel === "sms"
-                    ? "border-smart-teal bg-smart-teal-light text-smart-teal"
-                    : "border-slate-200 text-slate-600"
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>SMS</span>
-              </button>
-            </div>
           </div>
 
           <button
@@ -593,53 +941,39 @@ export function SmartMeView({
             {isLoadingAuth ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Sending Code...</span>
+                <span>Creating Account...</span>
               </>
             ) : (
-              <span>Send 6-Digit Verification Code</span>
+              <span>Verify &amp; Create Account</span>
             )}
           </button>
-        </form>
-      ) : (
-        <form onSubmit={handleVerifyOtp} className="space-y-4">
-          {bridgeFallbackCode && (
-            <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
-              <p className="font-bold">Instant Verification Code Ready:</p>
-              <p className="font-mono text-base font-black text-smart-teal mt-0.5">
-                {bridgeFallbackCode}
-              </p>
-            </div>
-          )}
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              6-Digit Verification Code
-            </label>
-            <input
-              type="text"
-              required
-              maxLength={6}
-              value={otpCodeInput}
-              onChange={(e) => setOtpCodeInput(e.target.value)}
-              placeholder="123456"
-              className="w-full h-12 px-4 rounded-xl border border-slate-200 text-center font-mono text-lg font-black tracking-widest focus:outline-none focus:ring-2 focus:ring-smart-teal"
-            />
-          </div>
-
-          <div className="flex gap-2">
+          <div className="flex items-center justify-between text-xs font-bold pt-1">
             <button
               type="button"
-              onClick={() => setOtpStep("phone")}
-              className="h-11 px-4 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+              disabled={resendCooldown > 0 || isLoadingAuth}
+              onClick={() => handleRequestSmsOtp("signup")}
+              className={`cursor-pointer ${
+                resendCooldown > 0
+                  ? "text-slate-400 cursor-not-allowed"
+                  : "text-smart-teal hover:underline"
+              }`}
             >
-              Back
+              {resendCooldown > 0
+                ? `Resend code in ${resendCooldown}s`
+                : "Resend SMS Code"}
             </button>
+
             <button
-              type="submit"
-              disabled={isLoadingAuth}
-              className="flex-1 h-11 rounded-xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black text-xs sm:text-sm cursor-pointer"
+              type="button"
+              onClick={() => {
+                setAuthError(null);
+                setOtpStep("request");
+                setOtpCodeInput("");
+              }}
+              className="text-slate-500 hover:text-slate-900 hover:underline cursor-pointer"
             >
-              {isLoadingAuth ? "Verifying..." : "Verify & Sign In"}
+              Edit Account Details
             </button>
           </div>
         </form>
@@ -731,7 +1065,9 @@ export function SmartMeView({
                 onClick={() => {
                   setAuthError(null);
                   setAuthMode("signin");
-                  setOtpStep("phone");
+                  setSignInSubMode("password");
+                  setOtpStep("request");
+                  setOtpCodeInput("");
                   setIsOtpModalOpen(true);
                 }}
                 className="px-5 py-2.5 rounded-2xl bg-smart-gold hover:bg-smart-gold-hover text-slate-950 text-xs sm:text-sm font-black shadow-md flex items-center gap-1.5 cursor-pointer"

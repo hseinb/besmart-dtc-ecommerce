@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   X,
   Heart,
@@ -12,6 +12,8 @@ import {
   Truck,
   ShieldCheck,
   Maximize2,
+  ZoomIn,
+  ZoomOut,
   ChevronLeft,
   ChevronRight,
   Sparkles,
@@ -59,9 +61,14 @@ export function SmartProductDetailModal({
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isZoomedIn, setIsZoomedIn] = useState(false);
   const [orderQty, setOrderQty] = useState(1);
   const [addedFeedback, setAddedFeedback] = useState(false);
   const [shareFeedback, setShareFeedback] = useState(false);
+
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipeStartYRef = useRef<number | null>(null);
+  const didSwipeRef = useRef<boolean>(false);
 
   const [frequentlyBought, setFrequentlyBought] = useState<ItemWithImages[]>(
     []
@@ -75,6 +82,7 @@ export function SmartProductDetailModal({
     if (!selectedProduct) return;
     setActiveImageIndex(0);
     setIsLightboxOpen(false);
+    setIsZoomedIn(false);
     setOrderQty(1);
     setAddedFeedback(false);
     addRecentlyViewed(selectedProduct);
@@ -97,33 +105,139 @@ export function SmartProductDetailModal({
     };
   }, [selectedProduct, appSettings, addRecentlyViewed]);
 
-  // Close on Escape key
+  const gallery = selectedProduct ? getItemGalleryUrls(selectedProduct) : [];
+
+  // Close on Escape key & cycle images on ArrowLeft / ArrowRight
   useEffect(() => {
     if (!selectedProduct) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (isLightboxOpen) {
           setIsLightboxOpen(false);
+          setIsZoomedIn(false);
         } else {
           closeProductDetail();
         }
+      } else if (e.key === "ArrowLeft" && gallery.length > 1) {
+        setIsZoomedIn(false);
+        setActiveImageIndex((prev) =>
+          prev === 0 ? gallery.length - 1 : prev - 1
+        );
+      } else if (e.key === "ArrowRight" && gallery.length > 1) {
+        setIsZoomedIn(false);
+        setActiveImageIndex((prev) =>
+          prev === gallery.length - 1 ? 0 : prev + 1
+        );
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedProduct, isLightboxOpen, closeProductDetail]);
+  }, [selectedProduct, isLightboxOpen, closeProductDetail, gallery.length]);
 
   if (!selectedProduct) return null;
 
-  const gallery = getItemGalleryUrls(selectedProduct);
   const currentSlot = gallery[activeImageIndex] || gallery[0];
   const currentViewUrl =
     currentSlot?.view ||
-    currentSlot?.raw ||
+    (currentSlot?.raw && !currentSlot.raw.includes("drive.google.com")
+      ? currentSlot.raw
+      : undefined) ||
     currentSlot?.thumb ||
     getItemImageUrl(selectedProduct, "view");
-  const currentRawUrl =
-    currentSlot?.raw || currentSlot?.view || currentViewUrl;
+  const rawCandidate =
+    currentSlot?.raw && !currentSlot.raw.includes("drive.google.com")
+      ? currentSlot.raw
+      : undefined;
+  const currentRawUrl = rawCandidate || currentSlot?.view || currentViewUrl;
+
+  const goPrevImage = () => {
+    if (gallery.length <= 1) return;
+    setIsZoomedIn(false);
+    setActiveImageIndex((prev) =>
+      prev === 0 ? gallery.length - 1 : prev - 1
+    );
+  };
+
+  const goNextImage = () => {
+    if (gallery.length <= 1) return;
+    setIsZoomedIn(false);
+    setActiveImageIndex((prev) =>
+      prev === gallery.length - 1 ? 0 : prev + 1
+    );
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    swipeStartXRef.current = e.touches[0].clientX;
+    swipeStartYRef.current = e.touches[0].clientY;
+    didSwipeRef.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (swipeStartXRef.current === null || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - swipeStartXRef.current;
+    const dy = e.touches[0].clientY - (swipeStartYRef.current ?? 0);
+    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      didSwipeRef.current = true;
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeStartXRef.current === null || e.changedTouches.length === 0)
+      return;
+    const dx = e.changedTouches[0].clientX - swipeStartXRef.current;
+    const dy = e.changedTouches[0].clientY - (swipeStartYRef.current ?? 0);
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+    if (
+      gallery.length > 1 &&
+      Math.abs(dx) >= 40 &&
+      Math.abs(dx) > Math.abs(dy)
+    ) {
+      didSwipeRef.current = true;
+      if (dx < 0) {
+        goNextImage();
+      } else {
+        goPrevImage();
+      }
+    }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch") return;
+    swipeStartXRef.current = e.clientX;
+    swipeStartYRef.current = e.clientY;
+    didSwipeRef.current = false;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch" || swipeStartXRef.current === null) return;
+    const dx = e.clientX - swipeStartXRef.current;
+    const dy = e.clientY - (swipeStartYRef.current ?? 0);
+    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      didSwipeRef.current = true;
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch" || swipeStartXRef.current === null) return;
+    const dx = e.clientX - swipeStartXRef.current;
+    const dy = e.clientY - (swipeStartYRef.current ?? 0);
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+    if (
+      gallery.length > 1 &&
+      Math.abs(dx) >= 40 &&
+      Math.abs(dx) > Math.abs(dy)
+    ) {
+      didSwipeRef.current = true;
+      if (dx < 0) {
+        goNextImage();
+      } else {
+        goPrevImage();
+      }
+    }
+  };
 
   const pricing = resolveRetailPrice(
     selectedProduct.srp,
@@ -290,17 +404,33 @@ export function SmartProductDetailModal({
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
               {/* Left: Multi-Angle R2 Image Gallery */}
               <div className="md:col-span-6 space-y-3">
-                <div className="relative aspect-square rounded-2xl bg-slate-100 border border-slate-200/80 overflow-hidden group">
+                <div
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  className="relative aspect-square rounded-2xl bg-slate-100 border border-slate-200/80 overflow-hidden group select-none touch-pan-y"
+                >
                   <img
                     src={currentViewUrl}
                     alt={selectedProduct.item_name}
-                    onClick={() => setIsLightboxOpen(true)}
-                    className="w-full h-full object-contain bg-white cursor-zoom-in"
+                    draggable={false}
+                    onClick={() => {
+                      if (didSwipeRef.current) {
+                        didSwipeRef.current = false;
+                        return;
+                      }
+                      setIsZoomedIn(false);
+                      setIsLightboxOpen(true);
+                    }}
+                    className="w-full h-full object-contain bg-white cursor-zoom-in select-none"
                   />
 
                   {/* Top-Left Discount Badge */}
                   {pricing.isOnSale && (
-                    <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-smart-sale text-white text-xs font-black shadow-sm">
+                    <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-smart-sale text-white text-xs font-black shadow-sm pointer-events-none">
                       <Zap className="w-3.5 h-3.5 fill-current" />
                       <span>-{pricing.discountPercent}% OFF</span>
                     </span>
@@ -309,7 +439,10 @@ export function SmartProductDetailModal({
                   {/* Fullscreen Zoom Button */}
                   <button
                     type="button"
-                    onClick={() => setIsLightboxOpen(true)}
+                    onClick={() => {
+                      setIsZoomedIn(false);
+                      setIsLightboxOpen(true);
+                    }}
                     className="absolute bottom-3 right-3 px-2.5 py-1.5 rounded-xl bg-slate-900/75 hover:bg-slate-900 text-white text-[11px] font-bold flex items-center gap-1.5 backdrop-blur-xs cursor-pointer"
                   >
                     <Maximize2 className="w-3.5 h-3.5" />
@@ -323,11 +456,7 @@ export function SmartProductDetailModal({
                     <>
                       <button
                         type="button"
-                        onClick={() =>
-                          setActiveImageIndex((prev) =>
-                            prev === 0 ? gallery.length - 1 : prev - 1
-                          )
-                        }
+                        onClick={goPrevImage}
                         className="absolute left-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center cursor-pointer"
                         aria-label="Previous image"
                       >
@@ -335,11 +464,7 @@ export function SmartProductDetailModal({
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          setActiveImageIndex((prev) =>
-                            prev === gallery.length - 1 ? 0 : prev + 1
-                          )
-                        }
+                        onClick={goNextImage}
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center cursor-pointer"
                         aria-label="Next image"
                       >
@@ -359,7 +484,10 @@ export function SmartProductDetailModal({
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => setActiveImageIndex(idx)}
+                          onClick={() => {
+                            setIsZoomedIn(false);
+                            setActiveImageIndex(idx);
+                          }}
                           className={`w-16 h-16 rounded-xl overflow-hidden border-2 shrink-0 transition-all cursor-pointer ${
                             activeImageIndex === idx
                               ? "border-smart-teal scale-105 shadow-xs"
@@ -369,6 +497,7 @@ export function SmartProductDetailModal({
                           <img
                             src={thumb}
                             alt={`Angle ${idx + 1}`}
+                            draggable={false}
                             className="w-full h-full object-cover"
                           />
                         </button>
@@ -757,21 +886,111 @@ export function SmartProductDetailModal({
       {/* High-Res R2 Lightbox Zoom Overlay */}
       {isLightboxOpen && (
         <div
-          onClick={() => setIsLightboxOpen(false)}
-          className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4"
+          onClick={() => {
+            setIsLightboxOpen(false);
+            setIsZoomedIn(false);
+          }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4 overflow-hidden select-none touch-pan-y"
         >
-          <button
-            type="button"
-            onClick={() => setIsLightboxOpen(false)}
-            className="absolute top-4 right-4 p-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white cursor-pointer"
+          {/* Top Controls Bar: Slide Counter + Zoom Toggle + Close */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between gap-2"
           >
-            <X className="w-5 h-5" />
-          </button>
+            <div className="px-3 py-1.5 rounded-full bg-white/15 backdrop-blur-xs text-white text-xs font-extrabold">
+              {activeImageIndex + 1} / {gallery.length}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsZoomedIn((z) => !z)}
+                className="px-3 py-2 rounded-full bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                aria-label={isZoomedIn ? "Zoom out" : "Zoom in"}
+              >
+                {isZoomedIn ? (
+                  <>
+                    <ZoomOut className="w-4 h-4" />
+                    <span>1x</span>
+                  </>
+                ) : (
+                  <>
+                    <ZoomIn className="w-4 h-4" />
+                    <span>2x Zoom</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLightboxOpen(false);
+                  setIsZoomedIn(false);
+                }}
+                aria-label="Close zoom overlay"
+                className="p-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Prev / Next Navigation Buttons in Lightbox */}
+          {gallery.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  goPrevImage();
+                }}
+                aria-label="Previous image"
+                className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-white/15 hover:bg-white/30 text-white backdrop-blur-xs flex items-center justify-center cursor-pointer"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  goNextImage();
+                }}
+                aria-label="Next image"
+                className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-white/15 hover:bg-white/30 text-white backdrop-blur-xs flex items-center justify-center cursor-pointer"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </>
+          )}
+
           <img
             src={currentRawUrl}
             alt={selectedProduct.item_name}
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-full max-h-[85vh] object-contain rounded-lg"
+            draggable={false}
+            onError={(e) => {
+              if (e.currentTarget.src !== currentViewUrl) {
+                e.currentTarget.src = currentViewUrl;
+              }
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (didSwipeRef.current) {
+                didSwipeRef.current = false;
+                return;
+              }
+              setIsZoomedIn((z) => !z);
+            }}
+            className={`max-w-full max-h-[82vh] object-contain rounded-lg transition-transform duration-200 select-none ${
+              isZoomedIn
+                ? "scale-175 sm:scale-200 cursor-zoom-out"
+                : "scale-100 cursor-zoom-in"
+            }`}
           />
         </div>
       )}

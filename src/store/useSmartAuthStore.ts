@@ -1,17 +1,13 @@
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import {
-  ItemWithImages,
   SmartAddress,
   SmartCustomer,
   SmartOrder,
   SmartStaffUser,
 } from "@/types/smart.types";
 import { useSmartCartStore } from "@/store/useSmartCartStore";
-import {
-  useSmartWishlistStore,
-  getOrCreateSmartDeviceId,
-} from "@/store/useSmartWishlistStore";
+import { getOrCreateSmartDeviceId } from "@/store/useSmartWishlistStore";
 
 const CUSTOMER_SESSION_KEY = "bsmart_customer_session_v1";
 const STAFF_SESSION_KEY = "bsmart_staff_session_v1";
@@ -94,16 +90,33 @@ interface SmartAuthState {
     phone: string,
     password: string
   ) => Promise<{ success: boolean; errorMessage?: string; customer?: SmartCustomer }>;
+  sendPhoneOtp: (
+    phone: string,
+    purpose?: "signup" | "login" | "reset_password"
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    cooldownSeconds?: number;
+    retryAfterSeconds?: number;
+  }>;
+  verifySmsOtpAndAuth: (params: {
+    phone: string;
+    code: string;
+    purpose: "signup" | "login" | "reset_password";
+    fullName?: string;
+    password?: string;
+    email?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
   requestPhoneOtp: (
     phone: string,
-    fullName: string,
-    channel: "whatsapp" | "sms"
+    fullName?: string,
+    channel?: "whatsapp" | "sms"
   ) => Promise<RequestOtpResult>;
   verifyPhoneOtp: (
     phone: string,
     code: string,
     fullName?: string
-  ) => Promise<{ success: boolean; errorMessage?: string }>;
+  ) => Promise<{ success: boolean; errorMessage?: string; error?: string }>;
   fetchAddresses: () => Promise<void>;
   addAddress: (input: CreateAddressInput) => Promise<SmartAddress | null>;
   deleteAddress: (addressId: string) => Promise<void>;
@@ -505,187 +518,114 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
     }
   },
 
-  requestPhoneOtp: async (phone, fullName, channel) => {
+  sendPhoneOtp: async (phone, purpose = "signup") => {
     const normalizedPhone = normalizeSmartPhone(phone);
     if (normalizedPhone.length < 8) {
       return {
         success: false,
-        normalizedPhone,
-        bridgeDispatched: false,
-        errorMessage: "Please enter a valid mobile phone number.",
+        error: "Please enter a valid mobile phone number.",
       };
     }
 
     set({ isLoadingAuth: true });
     try {
       const supabase = createClient();
-      const otpCode = String(Math.floor(100000 + Math.random() * 900000));
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
-      // 1. Insert real OTP record into public.smart_otp_codes
-      const { error: otpError } = await supabase
-        .from("smart_otp_codes")
-        .insert({
+      const { data, error } = await supabase.functions.invoke("smart-otp", {
+        body: {
+          action: "send",
           phone: normalizedPhone,
-          code: otpCode,
-          channel,
-          expires_at: expiresAt,
-          is_used: false,
-          attempts: 0,
-        });
+          purpose: purpose || "signup",
+          lang: "en",
+        },
+      });
 
-      if (otpError) {
+      if (error) {
         return {
           success: false,
-          normalizedPhone,
-          bridgeDispatched: false,
-          errorMessage: otpError.message,
+          error: error.message || "Could not send verification SMS.",
         };
       }
 
-      // 2. Enqueue outbound OTP delivery task in public.smart_task_queue for smartBridge.js
-      const { data: taskRow } = await supabase
-        .from("smart_task_queue")
-        .insert({
-          procedure_name: "send_otp",
-          params: {
-            phone: normalizedPhone,
-            code: otpCode,
-            channel,
-            full_name: fullName.trim() || "Valued Shopper",
-          },
-          status: "Pending",
-        })
-        .select("id, status")
-        .single();
+      const parsed = (typeof data === "string" ? JSON.parse(data) : data) as {
+        success?: boolean;
+        error?: string;
+        cooldownSeconds?: number;
+        retryAfterSeconds?: number;
+      } | null;
 
-      // Check briefly if smartBridge.js picked up the task within 1.5s
-      let bridgeDispatched = false;
-      if (taskRow?.id) {
-        await new Promise((r) => setTimeout(r, 1200));
-        const { data: checkTask } = await supabase
-          .from("smart_task_queue")
-          .select("status")
-          .eq("id", taskRow.id)
-          .single();
-        if (checkTask && checkTask.status === "Completed") {
-          bridgeDispatched = true;
-        }
+      if (!parsed?.success) {
+        return {
+          success: false,
+          error: parsed?.error || "Could not send verification SMS.",
+          cooldownSeconds: parsed?.cooldownSeconds,
+          retryAfterSeconds: parsed?.retryAfterSeconds,
+        };
       }
 
       return {
         success: true,
-        normalizedPhone,
-        bridgeDispatched,
-        fallbackCode: bridgeDispatched ? undefined : otpCode,
+        cooldownSeconds: parsed.cooldownSeconds ?? 60,
+        retryAfterSeconds: parsed.retryAfterSeconds,
       };
     } catch (err) {
       return {
         success: false,
-        normalizedPhone,
-        bridgeDispatched: false,
-        errorMessage:
-          err instanceof Error ? err.message : "Failed to generate OTP.",
+        error:
+          err instanceof Error
+            ? err.message
+            : "Could not send verification SMS.",
       };
     } finally {
       set({ isLoadingAuth: false });
     }
   },
 
-  verifyPhoneOtp: async (phone, code, fullName) => {
-    const normalizedPhone = normalizeSmartPhone(phone);
-    const trimmedCode = code.trim();
-    if (!trimmedCode || trimmedCode.length < 4) {
+  verifySmsOtpAndAuth: async (params) => {
+    const normalizedPhone = normalizeSmartPhone(params.phone);
+    const cleanCode = params.code.trim();
+    if (!cleanCode || cleanCode.length < 4) {
       return {
         success: false,
-        errorMessage: "Please enter the 6-digit verification code.",
+        error: "Please enter the 6-digit verification code.",
       };
     }
 
     set({ isLoadingAuth: true });
     try {
       const supabase = createClient();
+      const { data, error } = await supabase.rpc(
+        "smart_verify_sms_otp_and_auth",
+        {
+          p_phone: normalizedPhone,
+          p_code: cleanCode,
+          p_purpose: params.purpose,
+          p_full_name: params.fullName?.trim() || null,
+          p_password: params.password || null,
+          p_email: params.email?.trim() || null,
+        }
+      );
 
-      // 1. Verify OTP in public.smart_otp_codes
-      const { data: otpRows, error: otpErr } = await supabase
-        .from("smart_otp_codes")
-        .select("*")
-        .eq("phone", normalizedPhone)
-        .eq("code", trimmedCode)
-        .eq("is_used", false)
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (otpErr || !otpRows || otpRows.length === 0) {
+      if (error) {
         return {
           success: false,
-          errorMessage:
-            "Invalid or expired verification code. Please request a new code.",
+          error: error.message || "Verification failed.",
         };
       }
 
-      // Mark OTP as used
-      await supabase
-        .from("smart_otp_codes")
-        .update({ is_used: true })
-        .eq("id", otpRows[0].id);
+      const res = data as {
+        success: boolean;
+        error?: string;
+        customer?: SmartCustomer;
+      } | null;
 
-      // 2. Find or create customer in public.smart_customers
-      const { data: existingCustomers } = await supabase
-        .from("smart_customers")
-        .select(SAFE_CUSTOMER_COLUMNS)
-        .eq("phone", normalizedPhone)
-        .limit(1);
-
-      let customer: SmartCustomer;
-      if (existingCustomers && existingCustomers.length > 0) {
-        const existing = existingCustomers[0] as SmartCustomer;
-        const updatedName =
-          fullName && fullName.trim().length > 1
-            ? fullName.trim()
-            : existing.full_name;
-
-        const { data: updatedRow, error: updErr } = await supabase
-          .from("smart_customers")
-          .update({
-            full_name: updatedName,
-            is_verified: true,
-            is_active: true,
-            last_login_at: new Date().toISOString(),
-          })
-          .eq("customer_id", existing.customer_id)
-          .select(SAFE_CUSTOMER_COLUMNS)
-          .single();
-
-        if (updErr || !updatedRow) {
-          throw new Error(updErr?.message || "Failed to update customer profile.");
-        }
-        customer = updatedRow as SmartCustomer;
-      } else {
-        const { data: insertedRow, error: insErr } = await supabase
-          .from("smart_customers")
-          .insert({
-            phone: normalizedPhone,
-            full_name:
-              fullName && fullName.trim().length > 1
-                ? fullName.trim()
-                : "B's Mart Member",
-            role: "customer",
-            is_verified: true,
-            is_active: true,
-            last_login_at: new Date().toISOString(),
-          })
-          .select(SAFE_CUSTOMER_COLUMNS)
-          .single();
-
-        if (insErr || !insertedRow) {
-          throw new Error(insErr?.message || "Failed to create customer profile.");
-        }
-        customer = insertedRow as SmartCustomer;
+      if (!res?.success || !res.customer) {
+        return {
+          success: false,
+          error: res?.error || "Verification failed.",
+        };
       }
 
-      // Save customer session locally
+      const customer = res.customer;
       if (typeof window !== "undefined") {
         try {
           window.localStorage.setItem(
@@ -694,24 +634,9 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
           );
         } catch {}
       }
-      set({ customer });
+      set({ customer, isLoadingAuth: false });
 
-      // 3. Automatic Guest-to-Customer Merge:
-      // 3a. Link any previous Guest Orders matching phone number
-      try {
-        const rawDigits = phone.replace(/[^0-9]/g, "");
-        await supabase
-          .from("smart_orders")
-          .update({ customer_id: customer.customer_id })
-          .is("customer_id", null)
-          .or(
-            `recipient_phone.eq.${normalizedPhone},recipient_phone.ilike.%${rawDigits.slice(
-              -7
-            )}%`
-          );
-      } catch {}
-
-      // 3b. Merge Guest Wishlist items into public.smart_wishlists
+      // Merge guest wishlist and cart
       try {
         const deviceId = getOrCreateSmartDeviceId();
         await supabase
@@ -720,39 +645,6 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
           .eq("device_id", deviceId)
           .is("customer_id", null);
 
-        // Also pull any cloud wishlist items for this customer
-        const { data: cloudWish } = await supabase
-          .from("smart_wishlists")
-          .select("item_id")
-          .eq("customer_id", customer.customer_id);
-
-        if (cloudWish && cloudWish.length > 0) {
-          const localWish = useSmartWishlistStore.getState().wishlistItems;
-          const localIds = new Set(localWish.map((i) => i.item_id));
-          const missingIds = cloudWish
-            .map((w) => Number(w.item_id))
-            .filter((id) => !localIds.has(id));
-
-          if (missingIds.length > 0) {
-            const { data: fetchedItems } = await supabase
-              .from("smart_items")
-              .select("*, item_images(*)")
-              .in("item_id", missingIds)
-              .eq("is_active", true);
-
-            if (fetchedItems && fetchedItems.length > 0) {
-              const mergedWish = [
-                ...localWish,
-                ...(fetchedItems as unknown as ItemWithImages[]),
-              ];
-              useSmartWishlistStore.setState({ wishlistItems: mergedWish });
-            }
-          }
-        }
-      } catch {}
-
-      // 3c. Sync Guest Cart with public.smart_carts
-      try {
         const cartState = useSmartCartStore.getState();
         await supabase.from("smart_carts").upsert(
           {
@@ -778,12 +670,37 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
     } catch (err) {
       return {
         success: false,
-        errorMessage:
-          err instanceof Error ? err.message : "OTP verification failed.",
+        error:
+          err instanceof Error ? err.message : "Verification failed.",
       };
     } finally {
       set({ isLoadingAuth: false });
     }
+  },
+
+  requestPhoneOtp: async (phone) => {
+    const normalizedPhone = normalizeSmartPhone(phone);
+    const res = await get().sendPhoneOtp(phone, "login");
+    return {
+      success: res.success,
+      normalizedPhone,
+      bridgeDispatched: res.success,
+      errorMessage: res.error,
+    };
+  },
+
+  verifyPhoneOtp: async (phone, code, fullName) => {
+    const res = await get().verifySmsOtpAndAuth({
+      phone,
+      code,
+      purpose: "login",
+      fullName,
+    });
+    return {
+      success: res.success,
+      error: res.error,
+      errorMessage: res.error,
+    };
   },
 
   fetchAddresses: async () => {

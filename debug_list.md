@@ -11,6 +11,27 @@ This file tracks bugs, UI glitches, sync issues, and platform discrepancies acro
 
 ## Resolved Issues
 
+### BUG-004: Pressing Zoom on an Image in Item View Brings Up a Broken Link
+- **Status**: `Resolved`
+- **Description & Reproduction Steps**:
+  1. Open any product in the Item View (Product Detail Modal) and tap the image or the **Zoom** button.
+  2. The fullscreen Lightbox Zoom overlay opens with a broken image icon.
+- **Root Cause**:
+  1. In `public.item_images`, 1,582 of 1,584 rows store a legacy Google Drive download link (`https://drive.google.com/uc?export=download&id=...`) in the `raw` tier while `view` (`1200×1200` WebP) and `thumb` (`300×300` WebP) point to Cloudflare R2 (`https://pub-91d344728db8455caa2530306bdfbcb0.r2.dev/...`).
+  2. Google Drive blocks `uc?export=download` URLs inside `<img>` tags in modern browsers and mobile WebViews (`Cross-Origin-Resource-Policy` / 403 / 302 redirect). Because `currentSlot.raw` was a truthy string, `currentRawUrl` evaluated to the blocked Google Drive URL instead of falling back to the high-resolution R2 `view` URL.
+- **Resolution**:
+  1. Updated `parseImageSlot` in [src/lib/media.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/lib/media.ts) and `currentRawUrl` in [SmartProductDetailModal.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductDetailModal.tsx) to ignore `drive.google.com` links in `raw` and fall back to the Cloudflare R2 `view` / `thumb` URL, plus added an `onError` fallback on the Lightbox `<img>` and interactive `1x` $\leftrightarrow$ `2x` zoom toggle.
+
+### BUG-005: Cannot Swipe Through Images in Item View (Only Buttons Work)
+- **Status**: `Resolved`
+- **Description & Reproduction Steps**:
+  1. Open a multi-angle product in the Item View (Product Detail Modal) or Zoom Lightbox.
+  2. Attempt to swipe left/right with touch or mouse drag across the image — nothing happens; only clicking the Prev/Next arrow buttons or thumbnails changed the image.
+- **Root Cause**:
+  1. Neither the main Item View gallery container nor the Lightbox Zoom overlay had `onTouchStart` / `onTouchMove` / `onTouchEnd` or pointer/mouse drag (`onPointerDown` / `onPointerMove` / `onPointerUp`) handlers attached.
+- **Resolution**:
+  1. Added touch and pointer/mouse drag swipe handlers (`±40px` horizontal threshold with `didSwipeRef` click suppression and `draggable={false}`) to both the main Item View gallery and the Lightbox Zoom overlay in [SmartProductDetailModal.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductDetailModal.tsx), along with Prev/Next buttons, slide counter badge, and `ArrowLeft` / `ArrowRight` keyboard navigation.
+
 ### BUG-003: "Shop by Category" Showing 2-Letter Initials Instead of Product Images
 - **Status**: `Resolved`
 - **Description & Reproduction Steps**:

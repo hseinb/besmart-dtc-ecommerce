@@ -15,6 +15,9 @@ import {
   ArrowRight,
   Zap,
   Loader2,
+  Share2,
+  Copy,
+  MessageCircle,
 } from "lucide-react";
 import {
   ItemWithImages,
@@ -25,6 +28,7 @@ import { useSmartNavStore } from "@/store/useSmartNavStore";
 import {
   useSmartCartStore,
   computeBagTotals,
+  encodeCartShareParam,
 } from "@/store/useSmartCartStore";
 import { useSmartWishlistStore } from "@/store/useSmartWishlistStore";
 import { getItemImageUrl } from "@/lib/media";
@@ -69,6 +73,7 @@ export function SmartBagView({
     ItemWithImages[]
   >([]);
   const [isLoadingRecs, setIsLoadingRecs] = useState(false);
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
 
   const allSelected =
     lines.length > 0 && lines.every((line) => line.selected);
@@ -150,12 +155,86 @@ export function SmartBagView({
     }
   };
 
+  const getSharePayload = () => {
+    const useSelected = bagTotals.selectedLines.length > 0;
+    const targetLines = useSelected ? bagTotals.selectedLines : lines;
+    const param =
+      encodeCartShareParam(lines, useSelected) ||
+      encodeCartShareParam(lines, false);
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "https://bsmartlb.com";
+    const shareUrl = `${origin}/?cart=${param}`;
+
+    const previewLines = targetLines.slice(0, 5).map((l) => {
+      const p = resolveRetailPrice(l.item.srp, l.item.discount);
+      return `• ${l.quantity}x ${l.item.item_name} ($${(
+        p.finalUnitPrice * l.quantity
+      ).toFixed(2)})`;
+    });
+    const extraCount = Math.max(0, targetLines.length - 5);
+    const totalUnits = targetLines.reduce((acc, l) => acc + l.quantity, 0);
+    const subtotal = targetLines.reduce((acc, l) => {
+      const p = resolveRetailPrice(l.item.srp, l.item.discount);
+      return acc + p.finalUnitPrice * l.quantity;
+    }, 0);
+
+    const text = [
+      `🛍️ *My B's Mart Shopping Bag (${totalUnits} ${
+        totalUnits === 1 ? "item" : "items"
+      } • $${subtotal.toFixed(2)})*`,
+      ...previewLines,
+      ...(extraCount > 0 ? [`• +${extraCount} more item(s)`] : []),
+      ``,
+      `Tap to preview or merge into your bag:`,
+      shareUrl,
+    ].join("\n");
+
+    return { shareUrl, text };
+  };
+
+  const handleWhatsAppShareBag = () => {
+    if (lines.length === 0) return;
+    const { text } = getSharePayload();
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleCopyBagLink = async () => {
+    if (lines.length === 0) return;
+    const { shareUrl } = getSharePayload();
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        setCopiedFeedback(true);
+        setTimeout(() => setCopiedFeedback(false), 2000);
+      } catch {}
+    }
+  };
+
+  const handleNativeOrCopyShareBag = async () => {
+    if (lines.length === 0) return;
+    const { shareUrl, text } = getSharePayload();
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: "My B's Mart Shopping Bag",
+          text,
+          url: shareUrl,
+        });
+        return;
+      } catch {}
+    }
+    await handleCopyBagLink();
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. Top Free-Shipping Progress Banner */}
       {appSettings.free_shipping_threshold > 0 && (
         <section className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-2xs space-y-2.5">
-          <div className="flex items-center justify-between gap-2 text-xs sm:text-sm font-bold">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm font-bold">
             <div className="flex items-center gap-2 text-slate-800">
               <div className="w-8 h-8 rounded-xl bg-smart-teal-light text-smart-teal flex items-center justify-center shrink-0">
                 <Truck className="w-4 h-4" />
@@ -179,9 +258,22 @@ export function SmartBagView({
                 </span>
               )}
             </div>
-            <span className="text-xs font-black text-smart-teal tabular-numbers shrink-0">
-              {bagTotals.freeShippingProgressPct}%
-            </span>
+
+            <div className="flex items-center gap-2.5 shrink-0">
+              {lines.length > 0 && !bagTotals.qualifiesForFreeShipping && (
+                <button
+                  type="button"
+                  onClick={handleWhatsAppShareBag}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-extrabold transition-colors cursor-pointer"
+                >
+                  <Share2 className="w-3 h-3" />
+                  <span>Share Bag to Combine Order</span>
+                </button>
+              )}
+              <span className="text-xs font-black text-smart-teal tabular-numbers">
+                {bagTotals.freeShippingProgressPct}%
+              </span>
+            </div>
           </div>
 
           <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden">
@@ -199,7 +291,7 @@ export function SmartBagView({
           {/* Left 8 Cols: Selectable Bag Items */}
           <div className="lg:col-span-8 bg-white rounded-3xl border border-slate-200/80 shadow-2xs overflow-hidden">
             {/* Select All Header Bar */}
-            <div className="px-4 sm:px-6 py-3.5 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2">
+            <div className="px-4 sm:px-6 py-3.5 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
               <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -213,13 +305,44 @@ export function SmartBagView({
                 </span>
               </label>
 
-              <button
-                type="button"
-                onClick={clearCart}
-                className="text-xs font-bold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-              >
-                Clear Bag
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleWhatsAppShareBag}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-extrabold transition-colors cursor-pointer"
+                  title="Share Bag on WhatsApp"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Share Bag</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyBagLink}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition-colors cursor-pointer"
+                  title="Copy Shareable Bag Link"
+                >
+                  {copiedFeedback ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-smart-teal" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={clearCart}
+                  className="text-xs font-bold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer pl-1"
+                >
+                  Clear Bag
+                </button>
+              </div>
             </div>
 
             {/* Line Items */}
@@ -554,6 +677,35 @@ export function SmartBagView({
                 </span>
                 <ArrowRight className="w-4 h-4 text-smart-gold" />
               </button>
+
+              {/* Shareable Bag Actions (WhatsApp + Copy Link / Native Share) */}
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={handleWhatsAppShareBag}
+                  className="h-10 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>WhatsApp Bag</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNativeOrCopyShareBag}
+                  className="h-10 px-3 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {copiedFeedback ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">Link Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-3.5 h-3.5 text-smart-teal" />
+                      <span>Share / Copy Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
               <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-medium">
                 <ShieldCheck className="w-3.5 h-3.5 text-smart-teal" />

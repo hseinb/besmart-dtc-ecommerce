@@ -11,7 +11,10 @@ import {
   SmartDeliveryZone,
 } from "@/types/smart.types";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
-import { useSmartCartStore } from "@/store/useSmartCartStore";
+import {
+  useSmartCartStore,
+  decodeCartShareParam,
+} from "@/store/useSmartCartStore";
 import { useSmartWishlistStore } from "@/store/useSmartWishlistStore";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
 import { SmartHeader } from "@/components/layout/SmartHeader";
@@ -21,6 +24,10 @@ import { SplitCategoryExplorer } from "@/components/category/SplitCategoryExplor
 import { SmartDealsView } from "@/components/deals/SmartDealsView";
 import { SmartBagView } from "@/components/bag/SmartBagView";
 import { SmartBagDrawer } from "@/components/bag/SmartBagDrawer";
+import {
+  SmartSharedBagModal,
+  SharedBagEntry,
+} from "@/components/bag/SmartSharedBagModal";
 import { SmartMeView } from "@/components/profile/SmartMeView";
 import { SmartAdminDashboard } from "@/components/admin/SmartAdminDashboard";
 import { SmartProductDetailModal } from "@/components/product/SmartProductDetailModal";
@@ -56,6 +63,7 @@ export function SmartAppShell({
     activeTab,
     openProductDetail,
     setAppSettings,
+    appSettings,
   } = useSmartNavStore();
 
   const {
@@ -69,6 +77,10 @@ export function SmartAppShell({
   } = useSmartWishlistStore();
 
   const { hydrate: hydrateAuth } = useSmartAuthStore();
+
+  const [sharedBagEntries, setSharedBagEntries] = React.useState<
+    SharedBagEntry[] | null
+  >(null);
 
   // Hydrate persisted consumer Bag, Wishlist, Auth stores + live smart_app_settings
   useEffect(() => {
@@ -116,6 +128,70 @@ export function SmartAppShell({
         }
       });
   }, [initialItems, openProductDetail]);
+
+  // Handle Shareable Bag Deep-Link (?cart=itemId.qty_itemId.qty)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const cartParam = params.get("cart");
+    if (!cartParam) return;
+
+    const decodedEntries = decodeCartShareParam(cartParam);
+    // Clean ?cart= from the address bar immediately so refresh doesn't re-open modal
+    try {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("cart");
+      window.history.replaceState({}, "", cleanUrl.toString());
+    } catch {}
+
+    if (decodedEntries.length === 0) return;
+
+    const itemIds = decodedEntries.map((d) => d.itemId);
+    const supabase = createClient();
+    const selectClause = appSettings.require_images
+      ? "*, item_images!inner(*)"
+      : "*, item_images(*)";
+
+    let query = supabase
+      .from("smart_items")
+      .select(selectClause)
+      .in("item_id", itemIds)
+      .eq("is_active", true);
+
+    if (
+      appSettings.hidden_categories &&
+      appSettings.hidden_categories.length > 0
+    ) {
+      query = query.not(
+        "class_id",
+        "in",
+        `(${appSettings.hidden_categories.join(",")})`
+      );
+    }
+
+    query.then(({ data }) => {
+      if (!data || !Array.isArray(data) || data.length === 0) return;
+      const itemMap = new Map<number, ItemWithImages>();
+      for (const row of data as unknown as ItemWithImages[]) {
+        itemMap.set(Number(row.item_id), row);
+      }
+
+      const resolved: SharedBagEntry[] = [];
+      for (const entry of decodedEntries) {
+        const matched = itemMap.get(entry.itemId);
+        if (matched) {
+          resolved.push({
+            item: matched,
+            quantity: entry.quantity,
+          });
+        }
+      }
+
+      if (resolved.length > 0) {
+        setSharedBagEntries(resolved);
+      }
+    });
+  }, [appSettings.require_images, appSettings.hidden_categories]);
 
   const bagCount = getTotalUnitCount();
   const wishlistCount = wishlistItems.length;
@@ -178,6 +254,12 @@ export function SmartAppShell({
       <SmartProductDetailModal
         categories={initialCategories}
         deliveryZones={deliveryZones}
+      />
+
+      {/* Incoming Shared Bag Preview Modal (?cart=...) */}
+      <SmartSharedBagModal
+        entries={sharedBagEntries}
+        onClose={() => setSharedBagEntries(null)}
       />
     </div>
   );

@@ -47,6 +47,54 @@ function saveCollectedCoupons(coupons: SmartCoupon[]) {
   } catch {}
 }
 
+export function encodeCartShareParam(
+  lines: SmartCartLine[],
+  onlySelected = false
+): string {
+  const source = onlySelected ? lines.filter((l) => l.selected) : lines;
+  return source
+    .filter((l) => Number(l.item?.item_id) > 0 && Number(l.quantity) > 0)
+    .map(
+      (l) =>
+        `${Math.floor(Number(l.item.item_id))}.${Math.max(
+          1,
+          Math.floor(Number(l.quantity) || 1)
+        )}`
+    )
+    .join("_");
+}
+
+export function decodeCartShareParam(
+  rawParam: string | null | undefined
+): { itemId: number; quantity: number }[] {
+  if (!rawParam || typeof rawParam !== "string") return [];
+  const trimmed = rawParam.trim();
+  if (!trimmed) return [];
+
+  const tokens = trimmed.split("_");
+  const merged = new Map<number, number>();
+
+  for (const token of tokens) {
+    if (!token) continue;
+    const parts = token.split(".");
+    if (parts.length !== 2) continue;
+
+    const itemId = Math.floor(Number(parts[0]));
+    const rawQty = Math.floor(Number(parts[1]));
+
+    if (!Number.isFinite(itemId) || itemId <= 0) continue;
+    const qty = Number.isFinite(rawQty) && rawQty >= 1 ? Math.min(999, rawQty) : 1;
+
+    if (!merged.has(itemId) && merged.size >= 50) continue;
+    merged.set(itemId, Math.min(999, (merged.get(itemId) || 0) + qty));
+  }
+
+  return Array.from(merged.entries()).map(([itemId, quantity]) => ({
+    itemId,
+    quantity,
+  }));
+}
+
 interface SmartCartState {
   lines: SmartCartLine[];
   collectedCoupons: SmartCoupon[];
@@ -65,6 +113,12 @@ interface SmartCartState {
   setAppliedCoupon: (coupon: SmartCoupon | null) => void;
   clearSelectedLines: () => void;
   clearCart: () => void;
+  mergeSharedItems: (
+    entries: { item: ItemWithImages; quantity: number }[]
+  ) => { addedUnits: number; cappedCount: number; skippedOutOfStockCount: number };
+  replaceWithSharedItems: (
+    entries: { item: ItemWithImages; quantity: number }[]
+  ) => { addedUnits: number; cappedCount: number; skippedOutOfStockCount: number };
 }
 
 export const useSmartCartStore = create<SmartCartState>((set, get) => ({
@@ -212,6 +266,106 @@ export const useSmartCartStore = create<SmartCartState>((set, get) => ({
   clearCart: () => {
     saveCartLines([]);
     set({ lines: [], appliedCoupon: null });
+  },
+
+  mergeSharedItems: (entries) => {
+    const updated = [...get().lines];
+    let addedUnits = 0;
+    let cappedCount = 0;
+    let skippedOutOfStockCount = 0;
+    const now = Date.now();
+
+    for (const entry of entries) {
+      const { item, quantity } = entry;
+      const maxStock = Math.floor(Number(item?.qtty) || 0);
+      if (maxStock <= 0) {
+        skippedOutOfStockCount += 1;
+        continue;
+      }
+
+      const reqQty = Math.max(1, Math.floor(Number(quantity) || 1));
+      const existingIdx = updated.findIndex(
+        (l) => l.item.item_id === item.item_id
+      );
+
+      if (existingIdx >= 0) {
+        const existing = updated[existingIdx];
+        const desired = existing.quantity + reqQty;
+        if (desired > maxStock) {
+          cappedCount += 1;
+        }
+        const nextQty = Math.min(maxStock, Math.max(1, desired));
+        const delta = Math.max(0, nextQty - existing.quantity);
+        addedUnits += delta;
+        updated[existingIdx] = {
+          ...existing,
+          item,
+          quantity: nextQty,
+          selected: true,
+        };
+      } else {
+        if (reqQty > maxStock) {
+          cappedCount += 1;
+        }
+        const initialQty = Math.min(maxStock, reqQty);
+        addedUnits += initialQty;
+        updated.unshift({
+          item,
+          quantity: initialQty,
+          selected: true,
+          addedAt: now,
+        });
+      }
+    }
+
+    saveCartLines(updated);
+    set({ lines: updated });
+    return { addedUnits, cappedCount, skippedOutOfStockCount };
+  },
+
+  replaceWithSharedItems: (entries) => {
+    const updated: SmartCartLine[] = [];
+    const seenIds = new Set<number>();
+    let addedUnits = 0;
+    let cappedCount = 0;
+    let skippedOutOfStockCount = 0;
+    const now = Date.now();
+
+    for (const entry of entries) {
+      const { item, quantity } = entry;
+      if (!item || seenIds.has(item.item_id)) continue;
+
+      const maxStock = Math.floor(Number(item.qtty) || 0);
+      if (maxStock <= 0) {
+        skippedOutOfStockCount += 1;
+        continue;
+      }
+
+      seenIds.add(item.item_id);
+      const reqQty = Math.max(1, Math.floor(Number(quantity) || 1));
+      if (reqQty > maxStock) {
+        cappedCount += 1;
+      }
+      const finalQty = Math.min(maxStock, reqQty);
+      addedUnits += finalQty;
+
+      updated.push({
+        item,
+        quantity: finalQty,
+        selected: true,
+        addedAt: now,
+      });
+    }
+
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(APPLIED_COUPON_KEY);
+      } catch {}
+    }
+
+    saveCartLines(updated);
+    set({ lines: updated, appliedCoupon: null });
+    return { addedUnits, cappedCount, skippedOutOfStockCount };
   },
 }));
 

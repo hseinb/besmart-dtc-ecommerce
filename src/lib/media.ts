@@ -43,12 +43,19 @@ export function parseImageSlot(slot: Json | null | undefined): ImageTierUrls | n
     const obj = slot as Record<string, unknown>;
     const thumb = typeof obj.thumb === "string" ? obj.thumb : undefined;
     const view = typeof obj.view === "string" ? obj.view : undefined;
-    const raw = typeof obj.raw === "string" ? obj.raw : undefined;
+    const rawStr = typeof obj.raw === "string" ? obj.raw : undefined;
+    const safeRaw =
+      rawStr && !rawStr.includes("drive.google.com") ? rawStr : undefined;
+
+    const resolvedThumb = resolveMediaUrl(thumb);
+    const resolvedView = resolveMediaUrl(view);
+    const resolvedRaw =
+      resolveMediaUrl(safeRaw) || resolvedView || resolvedThumb;
 
     return {
-      thumb: resolveMediaUrl(thumb),
-      view: resolveMediaUrl(view),
-      raw: resolveMediaUrl(raw),
+      thumb: resolvedThumb,
+      view: resolvedView,
+      raw: resolvedRaw,
     };
   }
   return null;

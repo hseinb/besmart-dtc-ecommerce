@@ -9,12 +9,15 @@ import {
   Plus,
   Minus,
   ArrowRight,
+  Share2,
+  Check,
 } from "lucide-react";
 import { SmartCoupon, SmartDeliveryZone } from "@/types/smart.types";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
 import {
   useSmartCartStore,
   computeBagTotals,
+  encodeCartShareParam,
 } from "@/store/useSmartCartStore";
 import { getItemImageUrl } from "@/lib/media";
 import { resolveRetailPrice } from "@/lib/pricing";
@@ -47,6 +50,7 @@ export function SmartBagDrawer({
   } = useSmartCartStore();
 
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [drawerShareCopied, setDrawerShareCopied] = useState(false);
 
   const defaultFee =
     deliveryZones[0]?.delivery_fee ?? appSettings.default_delivery_fee ?? 3;
@@ -61,6 +65,52 @@ export function SmartBagDrawer({
       ),
     [lines, appliedCoupon, appSettings.free_shipping_threshold, defaultFee]
   );
+
+  const handleDrawerShareBag = async () => {
+    if (lines.length === 0) return;
+    const useSelected = bagTotals.selectedLines.length > 0;
+    const targetLines = useSelected ? bagTotals.selectedLines : lines;
+    const param =
+      encodeCartShareParam(lines, useSelected) ||
+      encodeCartShareParam(lines, false);
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "https://bsmartlb.com";
+    const shareUrl = `${origin}/?cart=${param}`;
+    const totalUnits = targetLines.reduce((acc, l) => acc + l.quantity, 0);
+    const subtotal = targetLines.reduce((acc, l) => {
+      const p = resolveRetailPrice(l.item.srp, l.item.discount);
+      return acc + p.finalUnitPrice * l.quantity;
+    }, 0);
+    const text = `🛍️ *My B's Mart Shopping Bag (${totalUnits} ${
+      totalUnits === 1 ? "item" : "items"
+    } • $${subtotal.toFixed(2)})*\nTap to preview or merge into your bag:\n${shareUrl}`;
+
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({
+          title: "My B's Mart Shopping Bag",
+          text,
+          url: shareUrl,
+        });
+        return;
+      } catch {}
+    }
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        setDrawerShareCopied(true);
+        setTimeout(() => setDrawerShareCopied(false), 2000);
+        return;
+      } catch {}
+    }
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(text)}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
 
   if (!isBagDrawerOpen && !isCheckoutOpen) return null;
 
@@ -83,13 +133,35 @@ export function SmartBagDrawer({
                   My Shopping Bag ({getTotalUnitCount()})
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setBagDrawerOpen(false)}
-                className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {lines.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDrawerShareBag}
+                    title="Share Bag Link"
+                    className="px-2.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    {drawerShareCopied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-smart-gold" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Share2 className="w-3.5 h-3.5 text-smart-gold" />
+                        <span>Share</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setBagDrawerOpen(false)}
+                  className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Free-Shipping Progress Bar */}

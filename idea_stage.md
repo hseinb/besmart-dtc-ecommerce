@@ -84,3 +84,18 @@ This document tracks finalized brand/UI specs, active feature discussions, and t
   1. **Top Category Pill Bar (`SmartHeader.tsx`)**: Added dynamic Left (`ChevronLeft`) and Right (`ChevronRight`) smooth-scroll arrow buttons (`±320px`) with soft white edge gradients driven by `canScrollLeft` / `canScrollRight` overflow detection.
   2. **Unified Single Full-Width Hero Banner Carousel (`SmartHomeView.tsx`)**: Combined the main B's Mart Hero Banner (kept first as Slide 1, plus any `smart_banners` rows) and **all** `campaignTags` (`Best Sellers`, `New Arrivals`, etc.) into a single full-width Hero Banner Carousel with Left/Right navigation arrows, clickable slide indicator dots, and `5000ms` auto-rotation (pausing on hover).
   3. **Single-Row "Shop by Category" Image Balloons (`SmartHomeView.tsx`)**: Converted the 2-row 20-item slice into a single horizontal line (`flex flex-nowrap overflow-x-auto`) rendering **all** `visibleCategories` with dynamic Left (`ChevronLeft`) and Right (`ChevronRight`) smooth-scroll arrow buttons (`±360px`).
+
+### Phase 11 — Shareable Bag / WhatsApp Cart Link (`?cart=itemId.qty_itemId.qty`)
+- **Status**: Completed
+- **Summary**:
+  1. **Stateless Compact URL Encoding (`useSmartCartStore.ts`)**: Added `encodeCartShareParam`, `decodeCartShareParam`, `mergeSharedItems`, and `replaceWithSharedItems`.
+  2. **"Share Bag" Actions (`SmartBagView.tsx` & `SmartBagDrawer.tsx`)**: Added Share Bag buttons in the Free-Shipping progress card (*"Share Bag to Combine Order"*), Bag header bar, Order Summary card, and slide-over Bag Drawer with formatted WhatsApp summary, Native Share sheet, and Copy Link feedback.
+  3. **Incoming Shared Bag Preview Modal (`SmartSharedBagModal.tsx` & `SmartAppShell.tsx`)**: Detects `?cart=...`, queries live `public.smart_items` records, cleans the URL via `history.replaceState`, and lets the recipient choose **"Add All to My Bag (Merge)"** or **"Replace My Bag"** while respecting `hide_stock_qty` privacy and real stock caps.
+
+### Phase 12 — RetailSMS OTP Integration for Account Creation, Login & Password Reset
+- **Status**: Completed
+- **Summary**:
+  1. **Supabase Edge Function (`smart-send-otp`) & Database Verification (`smart_verify_otp_and_auth`)**: Server-side OTP generation, per-phone cooldown & hourly rate limiting, RetailSMS Lebanon (`retailsms.net`) gateway dispatch, and atomic OTP verification for `signup`, `login`, and `reset_password`.
+  2. **Auth Store Integration (`useSmartAuthStore.ts`)**: Added `sendPhoneOtp(phone, purpose)` and `verifySmsOtpAndAuth({ phone, code, purpose, fullName, password, email })` with automatic guest cart and wishlist merging upon verification.
+  3. **2-Tab Auth UI (`SmartMeView.tsx`)**: Replaced the old 3-tab switcher and fallback OTP banner with a clean 2-tab (`Sign In` | `Create Account`) interface supporting Password Sign In, SMS Code Sign In (`otp_login`), Forgot Password SMS Reset (`reset_password`), and 2-step SMS-verified Account Creation (`signup`) with `autoComplete="one-time-code"` and a live `60s` resend countdown timer.
+
