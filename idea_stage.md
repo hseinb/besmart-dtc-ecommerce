@@ -99,3 +99,11 @@ This document tracks finalized brand/UI specs, active feature discussions, and t
   2. **Auth Store Integration (`useSmartAuthStore.ts`)**: Added `sendPhoneOtp(phone, purpose)` and `verifySmsOtpAndAuth({ phone, code, purpose, fullName, password, email })` with automatic guest cart and wishlist merging upon verification.
   3. **2-Tab Auth UI (`SmartMeView.tsx`)**: Replaced the old 3-tab switcher and fallback OTP banner with a clean 2-tab (`Sign In` | `Create Account`) interface supporting Password Sign In, SMS Code Sign In (`otp_login`), Forgot Password SMS Reset (`reset_password`), and 2-step SMS-verified Account Creation (`signup`) with `autoComplete="one-time-code"` and a live `60s` resend countdown timer.
 
+### Phase 13 — Native Android & iOS Capacitor Apps (`com.bsmart.retail`) & Store Compliance
+- **Status**: Completed
+- **Summary**:
+  1. **Apple Guideline 5.1.1(v) Account Deletion RPC (`smart_delete_customer_account`)**: Added a `SECURITY DEFINER` PostgreSQL RPC (`public.smart_delete_customer_account`) and wired `deleteMyAccount` in `useSmartAuthStore.ts` to atomically delete saved addresses, wishlists, and cloud carts, anonymize historical `smart_orders` (`customer_id = NULL, is_guest = true`), and delete the customer record.
+  2. **Native Deep-Link Handling (`SmartAppShell.tsx`)**: Integrated `@capacitor/app` (`CapApp.addListener("appUrlOpen", ...)`) alongside web query parameters so tapping `https://bsmartlb.com/?product=...`, `https://bsmartlb.com/?cart=...`, or `bsmart://...` links on Android/iOS opens the Product Detail modal or Shared Bag Preview modal directly inside the app.
+  3. **Mobile Safe-Area Polish (`SmartBagDrawer.tsx` & `SmartProductDetailModal.tsx`)**: Added `.pt-safe` padding to the slide-over Bag Drawer top header bar and full-screen Zoom Lightbox top controls bar so iOS notch / Dynamic Island never overlaps interactive controls.
+
+

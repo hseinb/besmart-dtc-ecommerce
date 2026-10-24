@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">B\'s Mart</string>
+    <string name="title_activity_main">B\'s Mart</string>
+    <string name="package_name">com.bsmart.retail</string>
+    <string name="custom_url_scheme">com.bsmart.retail</string>
+</resources>

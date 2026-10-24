@@ -220,16 +220,32 @@ export async function submitSmartConsumerOrder(
   // 2b. Mirror B's Mart order into B2B warehouse tables (public.orders & public.order_details)
   // under single wholesale account acct_id = 3899 ("Bs Mart") at wholesale prices
   try {
-    const { data: mirrorRes } = await supabase.rpc("smart_mirror_order_to_b2b", {
-      p_smart_order_id: createdOrder.order_id,
-    });
-    const parsedMirror = mirrorRes as {
-      success?: boolean;
-      b2b_order_id?: number;
-    } | null;
-    if (parsedMirror?.b2b_order_id) {
-      createdOrder.b2b_order_id = parsedMirror.b2b_order_id;
-      createdOrder.b2b_status = "Pending";
+    const { data: mirrorRes, error: mirrorError } = await supabase.rpc(
+      "smart_mirror_order_to_b2b",
+      {
+        p_smart_order_id: createdOrder.order_id,
+      }
+    );
+    if (mirrorError) {
+      console.error(
+        "RPC smart_mirror_order_to_b2b returned error:",
+        mirrorError.message
+      );
+    } else {
+      const parsedMirror = mirrorRes as {
+        success?: boolean;
+        b2b_order_id?: number;
+        error?: string;
+      } | null;
+      if (parsedMirror?.success && parsedMirror.b2b_order_id) {
+        createdOrder.b2b_order_id = parsedMirror.b2b_order_id;
+        createdOrder.b2b_status = "Pending";
+      } else if (parsedMirror?.error) {
+        console.error(
+          "smart_mirror_order_to_b2b failed:",
+          parsedMirror.error
+        );
+      }
     }
   } catch (err) {
     console.error("Failed to mirror order to B2B acct_id 3899:", err);

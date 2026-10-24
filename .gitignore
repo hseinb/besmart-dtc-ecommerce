@@ -34,3 +34,22 @@ next-env.d.ts
 .agent/
 .claude/
 .gemini/
+
+# Native Android & iOS build / signing artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+ios/App/Pods/
+ios/App/build/
+*.jks
+*.keystore
+keystore.properties
+play-service-account.json
+*.ipa
+*.apk
+*.aab
+*.p12
+*.p8
+*.mobileprovision
+

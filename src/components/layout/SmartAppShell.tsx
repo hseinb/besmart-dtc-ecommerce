@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useCallback } from "react";
+import { App as CapApp } from "@capacitor/app";
 import {
   ItemClass,
   ItemTag,
@@ -99,99 +100,146 @@ export function SmartAppShell({
     hydrateAuth,
   ]);
 
-  // Handle WhatsApp / Social Product Deep-Link (?product=ITEM_ID)
+  const handleProductDeepLink = useCallback(
+    (productIdParam: string | null) => {
+      if (!productIdParam) return;
+      const numId = Number(productIdParam);
+      if (Number.isNaN(numId) || numId <= 0) return;
+
+      const existing = initialItems.find((i) => i.item_id === numId);
+      if (existing) {
+        openProductDetail(existing);
+        return;
+      }
+
+      const supabase = createClient();
+      supabase
+        .from("smart_items")
+        .select("*, item_images(*)")
+        .eq("item_id", numId)
+        .eq("is_active", true)
+        .single()
+        .then(({ data }) => {
+          if (data) {
+            openProductDetail(data as unknown as ItemWithImages);
+          }
+        });
+    },
+    [initialItems, openProductDetail]
+  );
+
+  const handleCartDeepLink = useCallback(
+    (cartParam: string | null) => {
+      if (!cartParam) return;
+      const decodedEntries = decodeCartShareParam(cartParam);
+      if (decodedEntries.length === 0) return;
+
+      const itemIds = decodedEntries.map((d) => d.itemId);
+      const supabase = createClient();
+      const selectClause = appSettings.require_images
+        ? "*, item_images!inner(*)"
+        : "*, item_images(*)";
+
+      let query = supabase
+        .from("smart_items")
+        .select(selectClause)
+        .in("item_id", itemIds)
+        .eq("is_active", true);
+
+      if (
+        appSettings.hidden_categories &&
+        appSettings.hidden_categories.length > 0
+      ) {
+        query = query.not(
+          "class_id",
+          "in",
+          `(${appSettings.hidden_categories.join(",")})`
+        );
+      }
+
+      query.then(({ data }) => {
+        if (!data || !Array.isArray(data) || data.length === 0) return;
+        const itemMap = new Map<number, ItemWithImages>();
+        for (const row of data as unknown as ItemWithImages[]) {
+          itemMap.set(Number(row.item_id), row);
+        }
+
+        const resolved: SharedBagEntry[] = [];
+        for (const entry of decodedEntries) {
+          const matched = itemMap.get(entry.itemId);
+          if (matched) {
+            resolved.push({
+              item: matched,
+              quantity: entry.quantity,
+            });
+          }
+        }
+
+        if (resolved.length > 0) {
+          setSharedBagEntries(resolved);
+        }
+      });
+    },
+    [appSettings.require_images, appSettings.hidden_categories]
+  );
+
+  // Handle Web URL Deep-Links (?product=ITEM_ID and ?cart=itemId.qty_itemId.qty)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const productIdParam = params.get("product");
-    if (!productIdParam) return;
-
-    const numId = Number(productIdParam);
-    if (Number.isNaN(numId) || numId <= 0) return;
-
-    const existing = initialItems.find((i) => i.item_id === numId);
-    if (existing) {
-      openProductDetail(existing);
-      return;
-    }
-
-    const supabase = createClient();
-    supabase
-      .from("smart_items")
-      .select("*, item_images(*)")
-      .eq("item_id", numId)
-      .eq("is_active", true)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          openProductDetail(data as unknown as ItemWithImages);
-        }
-      });
-  }, [initialItems, openProductDetail]);
-
-  // Handle Shareable Bag Deep-Link (?cart=itemId.qty_itemId.qty)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
     const cartParam = params.get("cart");
-    if (!cartParam) return;
 
-    const decodedEntries = decodeCartShareParam(cartParam);
-    // Clean ?cart= from the address bar immediately so refresh doesn't re-open modal
-    try {
-      const cleanUrl = new URL(window.location.href);
-      cleanUrl.searchParams.delete("cart");
-      window.history.replaceState({}, "", cleanUrl.toString());
-    } catch {}
-
-    if (decodedEntries.length === 0) return;
-
-    const itemIds = decodedEntries.map((d) => d.itemId);
-    const supabase = createClient();
-    const selectClause = appSettings.require_images
-      ? "*, item_images!inner(*)"
-      : "*, item_images(*)";
-
-    let query = supabase
-      .from("smart_items")
-      .select(selectClause)
-      .in("item_id", itemIds)
-      .eq("is_active", true);
-
-    if (
-      appSettings.hidden_categories &&
-      appSettings.hidden_categories.length > 0
-    ) {
-      query = query.not(
-        "class_id",
-        "in",
-        `(${appSettings.hidden_categories.join(",")})`
-      );
+    if (productIdParam) {
+      handleProductDeepLink(productIdParam);
     }
 
-    query.then(({ data }) => {
-      if (!data || !Array.isArray(data) || data.length === 0) return;
-      const itemMap = new Map<number, ItemWithImages>();
-      for (const row of data as unknown as ItemWithImages[]) {
-        itemMap.set(Number(row.item_id), row);
-      }
+    if (cartParam) {
+      // Clean ?cart= from the address bar immediately so refresh doesn't re-open modal
+      try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete("cart");
+        window.history.replaceState({}, "", cleanUrl.toString());
+      } catch {}
+      handleCartDeepLink(cartParam);
+    }
+  }, [handleProductDeepLink, handleCartDeepLink]);
 
-      const resolved: SharedBagEntry[] = [];
-      for (const entry of decodedEntries) {
-        const matched = itemMap.get(entry.itemId);
-        if (matched) {
-          resolved.push({
-            item: matched,
-            quantity: entry.quantity,
-          });
+  // Handle Native Capacitor Android App Links / iOS Universal Links & Custom Scheme (bsmart://)
+  useEffect(() => {
+    let listenerHandle: { remove: () => Promise<void> } | null = null;
+    let isMounted = true;
+
+    CapApp.addListener("appUrlOpen", (event) => {
+      if (!event?.url) return;
+      try {
+        const parsed = new URL(event.url);
+        const productIdParam = parsed.searchParams.get("product");
+        const cartParam = parsed.searchParams.get("cart");
+        if (productIdParam) {
+          handleProductDeepLink(productIdParam);
         }
-      }
+        if (cartParam) {
+          handleCartDeepLink(cartParam);
+        }
+      } catch {}
+    })
+      .then((handle) => {
+        if (!isMounted) {
+          handle.remove().catch(() => {});
+        } else {
+          listenerHandle = handle;
+        }
+      })
+      .catch(() => {});
 
-      if (resolved.length > 0) {
-        setSharedBagEntries(resolved);
+    return () => {
+      isMounted = false;
+      if (listenerHandle) {
+        listenerHandle.remove().catch(() => {});
       }
-    });
-  }, [appSettings.require_images, appSettings.hidden_categories]);
+    };
+  }, [handleProductDeepLink, handleCartDeepLink]);
 
   const bagCount = getTotalUnitCount();
   const wishlistCount = wishlistItems.length;

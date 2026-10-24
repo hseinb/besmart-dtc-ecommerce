@@ -11,6 +11,19 @@ This file tracks bugs, UI glitches, sync issues, and platform discrepancies acro
 
 ## Resolved Issues
 
+### BUG-006: Submitted B's Mart Orders Not Appearing on Warehouse Stations (`smart_mirror_order_to_b2b` Failure)
+- **Status**: `Resolved`
+- **Description & Reproduction Steps**:
+  1. Create a customer account (or shop as Guest) and submit an order on B's Mart (e.g., `BSM-20261023-8437`, `order_id = 3`).
+  2. Check the warehouse stations / B2B order feed — the order does not appear under wholesale account `acct_id = 3899` (`"Bs Mart"`).
+- **Root Cause**:
+  1. In `public.smart_mirror_order_to_b2b(p_smart_order_id integer)`, both line-item loops queried `public.items i` and referenced `COALESCE(i.price, i.srp, sod.unit_price, 0)`. However, `public.items` stores the wholesale price in `i.srp` and does not have a `price` column, causing PostgreSQL to abort with `ERROR: 42703: column i.price does not exist`.
+  2. In [src/lib/smartOrders.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/lib/smartOrders.ts), `supabase.rpc("smart_mirror_order_to_b2b", ...)` did not destructure `error`, silently swallowing the RPC failure while `b2b_order_id` remained `NULL`.
+- **Resolution**:
+  1. Updated `public.smart_mirror_order_to_b2b` in Supabase to use `COALESCE(i.srp, si.base_b2b_srp, sod.unit_price, 0)` (joining `public.items i` and `public.smart_items si`).
+  2. Backfilled order `BSM-20261023-8437` (`smart_orders.order_id = 3` $\rightarrow$ mirrored to `public.orders.order_id = 67` under `acct_id = 3899`).
+  3. Updated [src/lib/smartOrders.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/lib/smartOrders.ts) to explicitly destructure and log `mirrorError` and `parsedMirror?.error`.
+
 ### BUG-004: Pressing Zoom on an Image in Item View Brings Up a Broken Link
 - **Status**: `Resolved`
 - **Description & Reproduction Steps**:

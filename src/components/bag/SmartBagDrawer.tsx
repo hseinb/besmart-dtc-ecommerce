@@ -126,7 +126,7 @@ export function SmartBagDrawer({
             className="bg-white w-full max-w-md h-full shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
           >
             {/* Header */}
-            <div className="px-4 py-3.5 border-b border-slate-100 flex items-center justify-between bg-smart-teal-deep text-white">
+            <div className="px-4 py-3.5 pt-safe border-b border-slate-100 flex items-center justify-between bg-smart-teal-deep text-white">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-smart-gold" />
                 <span className="text-sm font-black">

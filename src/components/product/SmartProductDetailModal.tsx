@@ -901,7 +901,7 @@ export function SmartProductDetailModal({
           {/* Top Controls Bar: Slide Counter + Zoom Toggle + Close */}
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between gap-2"
+            className="absolute top-4 left-4 right-4 z-20 pt-safe flex items-center justify-between gap-2"
           >
             <div className="px-3 py-1.5 rounded-full bg-white/15 backdrop-blur-xs text-white text-xs font-extrabold">
               {activeImageIndex + 1} / {gallery.length}

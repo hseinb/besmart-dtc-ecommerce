@@ -1,0 +1,177 @@
+name: Build & Deploy B's Mart iOS App to App Store Connect
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_app_store:
+        description: 'Upload directly to App Store Connect / TestFlight'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build-and-deploy:
+    name: Build & Sign B's Mart iOS App
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode (Latest Stable iOS SDK)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+
+      - name: Verify Xcode & iOS SDK Version
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Build B's Mart Next.js Storefront Export
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://nhellhapzcylcukdxcwo.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_EDjiXt4xhai8kjZtcGL4Kg_hvDYJuMD' }}
+        run: npm run build
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios
+
+      - name: Install CocoaPods Dependencies
+        run: |
+          cd ios/App
+          pod install --repo-update
+
+      - name: Install Apple Certificate & Provisioning Profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'bsmartTemporaryKeychain123' }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/profile.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          # Decode certificate and profile from secrets
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode --output $CERTIFICATE_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode --output $PP_PATH
+
+          # Create and unlock temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Re-encrypt certificate using macOS LibreSSL to format compatible with security tool
+          TEMP_PEM=$RUNNER_TEMP/cert_and_key.pem
+          LEGACY_CERT_PATH=$RUNNER_TEMP/legacy_cert.p12
+          openssl pkcs12 -in $CERTIFICATE_PATH -out $TEMP_PEM -nodes -passin "pass:$P12_PASSWORD"
+          openssl pkcs12 -export -in $TEMP_PEM -out $LEGACY_CERT_PATH -passout "pass:$P12_PASSWORD"
+
+          # Import certificate to keychain
+          security import $LEGACY_CERT_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH $(security list-keychains -d user | tr -d '"')
+
+          # Extract Team ID and UUID dynamically from provisioning profile
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin <<< $(security cms -D -i $PP_PATH))
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" /dev/stdin <<< $(security cms -D -i $PP_PATH))
+          echo "TEAM_ID=$TEAM_ID" >> $GITHUB_ENV
+          echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+          echo "Discovered Team ID: $TEAM_ID"
+          echo "Discovered Profile UUID: $PROFILE_UUID"
+
+          # Install provisioning profile under UUID and standard name
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
+
+          # Generate ExportOptions.plist for App Store
+          cat <<EOF > $RUNNER_TEMP/ExportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>$TEAM_ID</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.bsmart.retail</key>
+                  <string>$PROFILE_UUID</string>
+              </dict>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>uploadSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Build and Archive Xcode Project
+        run: |
+          xcodebuild archive \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            DEVELOPMENT_TEAM="$TEAM_ID"
+
+      - name: Export Signed iOS .IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportPath $RUNNER_TEMP/export \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
+
+      - name: Upload .IPA Artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsmart-ios-release
+          path: ${{ runner.temp }}/export/*.ipa
+          retention-days: 14
+
+      - name: Upload to App Store Connect / TestFlight
+        if: ${{ github.event.inputs.upload_to_app_store == 'true' }}
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect/private_keys
+          mkdir -p ~/.private_keys
+          echo -n "$API_KEY_BASE64" | base64 --decode --output ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+          cp ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 ~/.private_keys/AuthKey_${KEY_ID}.p8
+
+          IPA_FILE=$(find $RUNNER_TEMP/export -name "*.ipa" | head -n 1)
+          echo "Found IPA: $IPA_FILE"
+
+          echo "Validating IPA with App Store Connect..."
+          xcrun altool --validate-app \
+            -f "$IPA_FILE" \
+            -t ios \
+            --apiKey "$KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
+
+          echo "Uploading IPA to App Store Connect..."
+          xcrun altool --upload-app \
+            -f "$IPA_FILE" \
+            -t ios \
+            --apiKey "$KEY_ID" \
+            --apiIssuer "$ISSUER_ID"

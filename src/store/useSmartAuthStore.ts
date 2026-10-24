@@ -127,7 +127,11 @@ interface SmartAuthState {
     phone: string
   ) => Promise<SmartOrder | null>;
   signOut: () => void;
-  deleteMyAccount: () => Promise<{ success: boolean; errorMessage?: string }>;
+  deleteMyAccount: () => Promise<{
+    success: boolean;
+    error?: string;
+    errorMessage?: string;
+  }>;
 }
 
 export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
@@ -846,55 +850,66 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
   },
 
   deleteMyAccount: async () => {
-    const customer = get().customer;
-    if (!customer?.customer_id) {
-      return { success: false, errorMessage: "Not signed in." };
-    }
-
-    try {
-      const supabase = createClient();
-      // 1. Delete customer's saved addresses, wishlists, and cloud cart
-      await Promise.all([
-        supabase
-          .from("smart_addresses")
-          .delete()
-          .eq("customer_id", customer.customer_id),
-        supabase
-          .from("smart_wishlists")
-          .delete()
-          .eq("customer_id", customer.customer_id),
-        supabase
-          .from("smart_carts")
-          .delete()
-          .eq("customer_id", customer.customer_id),
-      ]);
-
-      // 2. Anonymize customer_id on past orders so accounting history remains intact while PII link is removed
-      await supabase
-        .from("smart_orders")
-        .update({ customer_id: null, is_guest: true })
-        .eq("customer_id", customer.customer_id);
-
-      // 3. Delete customer record from smart_customers
-      const { error } = await supabase
-        .from("smart_customers")
-        .delete()
-        .eq("customer_id", customer.customer_id);
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      get().signOut();
-      return { success: true };
-    } catch (err) {
+    const currentCustomer = get().customer;
+    if (!currentCustomer?.customer_id) {
       return {
         success: false,
-        errorMessage:
-          err instanceof Error
-            ? err.message
-            : "Could not delete account right now.",
+        error: "Not signed in.",
+        errorMessage: "Not signed in.",
       };
+    }
+
+    set({ isLoadingAuth: true });
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.rpc(
+        "smart_delete_customer_account",
+        {
+          p_customer_id: currentCustomer.customer_id,
+          p_phone: currentCustomer.phone,
+        }
+      );
+
+      const res = data as {
+        success?: boolean;
+        error?: string;
+      } | null;
+
+      if (error || !res?.success) {
+        const msg =
+          res?.error || error?.message || "Failed to delete account.";
+        return {
+          success: false,
+          error: msg,
+          errorMessage: msg,
+        };
+      }
+
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.removeItem(CUSTOMER_SESSION_KEY);
+        } catch {}
+      }
+
+      set({
+        customer: null,
+        addresses: [],
+        customerOrders: [],
+        isLoadingAuth: false,
+      });
+      return { success: true };
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Could not delete account right now.";
+      return {
+        success: false,
+        error: msg,
+        errorMessage: msg,
+      };
+    } finally {
+      set({ isLoadingAuth: false });
     }
   },
 }));
