@@ -139,7 +139,11 @@ export interface SmartPricingRule {
   updated_at?: string;
 }
 
-export type SmartStaffRole = "admin" | "merchandising" | "fulfillment";
+export type SmartStaffRole =
+  | "admin"
+  | "merchandising"
+  | "fulfillment"
+  | "content_creator";
 
 export interface SmartStaffUser {
   user_id: string;

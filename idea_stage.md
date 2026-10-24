@@ -106,4 +106,12 @@ This document tracks finalized brand/UI specs, active feature discussions, and t
   2. **Native Deep-Link Handling (`SmartAppShell.tsx`)**: Integrated `@capacitor/app` (`CapApp.addListener("appUrlOpen", ...)`) alongside web query parameters so tapping `https://bsmartlb.com/?product=...`, `https://bsmartlb.com/?cart=...`, or `bsmart://...` links on Android/iOS opens the Product Detail modal or Shared Bag Preview modal directly inside the app.
   3. **Mobile Safe-Area Polish (`SmartBagDrawer.tsx` & `SmartProductDetailModal.tsx`)**: Added `.pt-safe` padding to the slide-over Bag Drawer top header bar and full-screen Zoom Lightbox top controls bar so iOS notch / Dynamic Island never overlaps interactive controls.
 
+### Phase 14 — Content Creator / Digital Marketer Role & Multi-Quality Asset Studio (`Thumb` / `View` / `Raw`)
+- **Status**: Completed
+- **Summary**:
+  1. **Role & Staff Management (`public.smart_users` & `SmartAdminDashboard.tsx`)**: Added `'content_creator'` (`Content Creator / Digital Marketer`) role alongside `'admin'`, `'merchandising'`, and `'fulfillment'`, with read-only B2C Catalog access and Creator Studio actions.
+  2. **Multi-Quality Image & Angle Selector (`SmartCreatorShareModal.tsx` & `src/lib/media.ts`)**: Exposed all populated image slots (`hero1`, `dim1`, `angle1`–`angle5`) across **`Thumb`** (Fast Compact WebP), **`View`** (HD Studio WebP), and **`Raw`** (Original Master via `r2-image-proxy`), with single-angle and **"Save All Angles"** device downloads.
+  3. **Accompanying Caption Builder & Native File + Text Share**: Added field toggles (`Item Name`, `Price & Discount`, `Description & Specs`, `SKU Code`, `Product Link`), an editable caption textarea, automatic clipboard copy, and Web Share Level 2 (`navigator.share({ files, title, text })`) across `SmartProductCard.tsx`, `SmartProductDetailModal.tsx`, and `SmartAdminDashboard.tsx`.
+
+
 

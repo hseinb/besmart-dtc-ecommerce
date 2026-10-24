@@ -1,4 +1,4 @@
-import { Json, ItemImages } from "@/types/smart.types";
+import { Json, ItemImages, ItemWithImages } from "@/types/smart.types";
 
 export interface ImageTierUrls {
   thumb?: string;
@@ -6,8 +6,67 @@ export interface ImageTierUrls {
   raw?: string;
 }
 
+export type CreatorImageQuality = "thumb" | "view" | "raw";
+
+export interface CreatorImageSlot {
+  slotKey:
+    | "hero1"
+    | "dim1"
+    | "angle1"
+    | "angle2"
+    | "angle3"
+    | "angle4"
+    | "angle5";
+  label: string;
+  thumbUrl: string;
+  viewUrl: string;
+  rawUrl: string;
+  proxiedRawUrl: string;
+  isRawGoogleDrive: boolean;
+}
+
 const R2_PUBLIC_BASE =
   process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "https://pub-bhome.r2.dev";
+const SUPABASE_BASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "https://nhellhapzcylcukdxcwo.supabase.co";
+
+export function canAccessCreatorStudio(
+  staffUser: { role?: string; is_active?: boolean } | null | undefined
+): boolean {
+  return Boolean(
+    staffUser &&
+      staffUser.is_active !== false &&
+      ["content_creator", "merchandising", "admin"].includes(
+        staffUser.role || ""
+      )
+  );
+}
+
+export function getProxiedMediaBlobUrl(url: string): string {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host.endsWith(".r2.dev") ||
+      host === "drive.google.com" ||
+      host.endsWith(".googleusercontent.com")
+    ) {
+      return `${SUPABASE_BASE_URL.replace(
+        /\/$/,
+        ""
+      )}/functions/v1/r2-image-proxy?url=${encodeURIComponent(trimmed)}`;
+    }
+  } catch {
+    // Fall back to original URL if parsing fails
+  }
+  return trimmed;
+}
 
 export function parseImageSlot(slot: Json | null | undefined): ImageTierUrls | null {
   if (!slot) return null;
@@ -140,4 +199,85 @@ export function getItemGalleryUrls(item: {
   }
 
   return gallery;
+}
+
+function parseRawCreatorSlot(
+  slot: Json | null | undefined
+): { thumb?: string; view?: string; raw?: string } | null {
+  if (!slot) return null;
+  if (typeof slot === "string") {
+    const trimmed = slot.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return parseRawCreatorSlot(JSON.parse(trimmed) as Json);
+      } catch {
+        // Fall through
+      }
+    }
+    const resolved = resolveMediaUrl(trimmed);
+    return resolved ? { thumb: resolved, view: resolved, raw: resolved } : null;
+  }
+  if (Array.isArray(slot) && slot.length > 0) {
+    return parseRawCreatorSlot(slot[0] as Json);
+  }
+  if (typeof slot === "object" && !Array.isArray(slot)) {
+    const obj = slot as Record<string, unknown>;
+    const thumb =
+      typeof obj.thumb === "string" ? resolveMediaUrl(obj.thumb) : undefined;
+    const view =
+      typeof obj.view === "string" ? resolveMediaUrl(obj.view) : undefined;
+    const raw =
+      typeof obj.raw === "string" ? resolveMediaUrl(obj.raw) : undefined;
+    if (!thumb && !view && !raw) return null;
+    return {
+      thumb: thumb || view || raw,
+      view: view || thumb || raw,
+      raw: raw || view || thumb,
+    };
+  }
+  return null;
+}
+
+export function getItemCreatorGallerySlots(
+  item: ItemWithImages | null | undefined
+): CreatorImageSlot[] {
+  if (!item) return [];
+  const imgRecord = normalizeItemImages(item.item_images);
+  if (!imgRecord) return [];
+
+  const definitions: {
+    slotKey: CreatorImageSlot["slotKey"];
+    label: string;
+    value: Json | null | undefined;
+  }[] = [
+    { slotKey: "hero1", label: "Main Hero", value: imgRecord.hero1 },
+    { slotKey: "dim1", label: "Dimensions", value: imgRecord.dim1 },
+    { slotKey: "angle1", label: "Angle 1", value: imgRecord.angle1 },
+    { slotKey: "angle2", label: "Angle 2", value: imgRecord.angle2 },
+    { slotKey: "angle3", label: "Angle 3", value: imgRecord.angle3 },
+    { slotKey: "angle4", label: "Angle 4", value: imgRecord.angle4 },
+    { slotKey: "angle5", label: "Angle 5", value: imgRecord.angle5 },
+  ];
+
+  const results: CreatorImageSlot[] = [];
+  for (const def of definitions) {
+    const parsed = parseRawCreatorSlot(def.value);
+    if (!parsed) continue;
+    const thumbUrl = parsed.thumb || parsed.view || parsed.raw || "";
+    const viewUrl = parsed.view || parsed.thumb || parsed.raw || "";
+    const rawUrl = parsed.raw || viewUrl || thumbUrl;
+    if (!thumbUrl && !viewUrl && !rawUrl) continue;
+
+    results.push({
+      slotKey: def.slotKey,
+      label: def.label,
+      thumbUrl,
+      viewUrl,
+      rawUrl,
+      proxiedRawUrl: getProxiedMediaBlobUrl(rawUrl || viewUrl || thumbUrl),
+      isRawGoogleDrive: rawUrl.includes("drive.google.com"),
+    });
+  }
+
+  return results;
 }

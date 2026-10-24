@@ -32,10 +32,16 @@ import {
 import { useSmartNavStore } from "@/store/useSmartNavStore";
 import { useSmartCartStore } from "@/store/useSmartCartStore";
 import { useSmartWishlistStore } from "@/store/useSmartWishlistStore";
-import { getItemGalleryUrls, getItemImageUrl } from "@/lib/media";
+import { useSmartAuthStore } from "@/store/useSmartAuthStore";
+import {
+  getItemGalleryUrls,
+  getItemImageUrl,
+  canAccessCreatorStudio,
+} from "@/lib/media";
 import { resolveRetailPrice, resolveConsumerStockStatus } from "@/lib/pricing";
 import { fetchProductRecommendations } from "@/lib/recommendations";
 import { SmartProductCard } from "@/components/product/SmartProductCard";
+import { SmartCreatorShareModal } from "@/components/product/SmartCreatorShareModal";
 
 interface SmartProductDetailModalProps {
   categories: ItemClass[];
@@ -58,9 +64,12 @@ export function SmartProductDetailModal({
   const { lines, addItem } = useSmartCartStore();
   const { wishlistItems, toggleWishlist, addRecentlyViewed } =
     useSmartWishlistStore();
+  const staffUser = useSmartAuthStore((s) => s.staffUser);
+  const showCreatorBtn = canAccessCreatorStudio(staffUser);
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
   const [isZoomedIn, setIsZoomedIn] = useState(false);
   const [orderQty, setOrderQty] = useState(1);
   const [addedFeedback, setAddedFeedback] = useState(false);
@@ -82,6 +91,7 @@ export function SmartProductDetailModal({
     if (!selectedProduct) return;
     setActiveImageIndex(0);
     setIsLightboxOpen(false);
+    setIsCreatorModalOpen(false);
     setIsZoomedIn(false);
     setOrderQty(1);
     setAddedFeedback(false);
@@ -364,6 +374,18 @@ export function SmartProductDetailModal({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              {showCreatorBtn && (
+                <button
+                  type="button"
+                  onClick={() => setIsCreatorModalOpen(true)}
+                  className="px-3 py-1.5 rounded-full bg-smart-teal-deep hover:bg-smart-teal text-white text-xs font-black flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="Creator Studio (Thumb / View / Raw)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-smart-gold" />
+                  <span>Creator Studio (Thumb / View / Raw)</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleWhatsAppShare}
@@ -993,6 +1015,15 @@ export function SmartProductDetailModal({
             }`}
           />
         </div>
+      )}
+
+      {showCreatorBtn && isCreatorModalOpen && (
+        <SmartCreatorShareModal
+          item={selectedProduct}
+          isOpen={isCreatorModalOpen}
+          onClose={() => setIsCreatorModalOpen(false)}
+          initialSlotIndex={activeImageIndex}
+        />
       )}
     </>
   );

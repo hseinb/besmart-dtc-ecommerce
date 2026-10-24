@@ -30,6 +30,7 @@ import {
   Printer,
   FileText,
   PackageCheck,
+  Sparkles,
 } from "lucide-react";
 import {
   ItemClass,
@@ -54,6 +55,7 @@ import {
   SmartOrderPrintModal,
   PrintDocMode,
 } from "@/components/admin/SmartOrderPrintModal";
+import { SmartCreatorShareModal } from "@/components/product/SmartCreatorShareModal";
 import { getItemImageUrl } from "@/lib/media";
 
 type AdminSubTab =
@@ -130,6 +132,8 @@ export function SmartAdminDashboard({
     Record<number, { srp: string; discount: string }>
   >({});
   const [savingItemId, setSavingItemId] = useState<number | null>(null);
+  const [creatorShareItem, setCreatorShareItem] =
+    useState<ItemWithImages | null>(null);
 
   // 4. Coupons State
   const [coupons, setCoupons] = useState<SmartCoupon[]>([]);
@@ -172,6 +176,12 @@ export function SmartAdminDashboard({
   const [settingsDraft, setSettingsDraft] =
     useState<SmartAppSettings>(appSettings);
 
+  const isAdminRole = staffUser?.role === "admin";
+  const canManageCatalog =
+    isAdminRole || staffUser?.role === "merchandising";
+  const canViewCatalog =
+    canManageCatalog || staffUser?.role === "content_creator";
+
   useEffect(() => {
     setSettingsDraft(appSettings);
     setGlobalMarkupDraft(String(appSettings.default_markup_percent ?? 0));
@@ -185,6 +195,8 @@ export function SmartAdminDashboard({
       setSubTab("pricing");
     } else if (staffUser.role === "fulfillment" && subTab !== "orders") {
       setSubTab("orders");
+    } else if (staffUser.role === "content_creator" && subTab !== "catalog") {
+      setSubTab("catalog");
     }
   }, [staffUser, subTab]);
 
@@ -199,6 +211,9 @@ export function SmartAdminDashboard({
       if (staffUser.role === "admin") return true;
       if (staffUser.role === "merchandising") {
         return ["pricing", "catalog", "coupons", "banners"].includes(tabId);
+      }
+      if (staffUser.role === "content_creator") {
+        return tabId === "catalog";
       }
       if (staffUser.role === "fulfillment") {
         return tabId === "orders";
@@ -253,12 +268,41 @@ export function SmartAdminDashboard({
   const loadStaffAccounts = useCallback(async () => {
     if (!staffUser || staffUser.role !== "admin") return;
     const supabase = createClient();
-    const { data } = await supabase.rpc("smart_list_staff", {
+    const { data, error } = await supabase.rpc(
+      "smart_admin_list_staff_users",
+      {
+        p_staff_user_id: staffUser.user_id,
+      }
+    );
+    if (!error && data) {
+      const res = data as {
+        success?: boolean;
+        users?: SmartStaffUser[];
+        staff?: SmartStaffUser[];
+      };
+      if (Array.isArray(data)) {
+        setStaffList(data as SmartStaffUser[]);
+        return;
+      }
+      if (res.users) {
+        setStaffList(res.users);
+        return;
+      }
+      if (res.staff) {
+        setStaffList(res.staff);
+        return;
+      }
+    }
+
+    const fallback = await supabase.rpc("smart_list_staff", {
       p_admin_user_id: staffUser.user_id,
     });
-    const res = data as { success: boolean; staff?: SmartStaffUser[] } | null;
-    if (res?.success && res.staff) {
-      setStaffList(res.staff);
+    const fallbackRes = fallback.data as {
+      success: boolean;
+      staff?: SmartStaffUser[];
+    } | null;
+    if (fallbackRes?.success && fallbackRes.staff) {
+      setStaffList(fallbackRes.staff);
     }
   }, [staffUser]);
 
@@ -812,15 +856,31 @@ export function SmartAdminDashboard({
 
     try {
       const supabase = createClient();
-      const { data, error } = await supabase.rpc("smart_admin_upsert_staff", {
-        p_admin_user_id: staffUser.user_id,
-        p_target_user_id: null,
-        p_username: newStaffUsername.trim(),
-        p_password: newStaffPassword,
-        p_full_name: newStaffFullName.trim(),
-        p_role: newStaffRole,
-        p_is_active: true,
-      });
+      let { data, error } = await supabase.rpc(
+        "smart_admin_upsert_staff_user",
+        {
+          p_staff_user_id: staffUser.user_id,
+          p_username: newStaffUsername.trim(),
+          p_full_name: newStaffFullName.trim(),
+          p_role: newStaffRole,
+          p_password: newStaffPassword,
+          p_is_active: true,
+        }
+      );
+
+      if (error) {
+        const fallback = await supabase.rpc("smart_admin_upsert_staff", {
+          p_admin_user_id: staffUser.user_id,
+          p_target_user_id: null,
+          p_username: newStaffUsername.trim(),
+          p_password: newStaffPassword,
+          p_full_name: newStaffFullName.trim(),
+          p_role: newStaffRole,
+          p_is_active: true,
+        });
+        data = fallback.data;
+        error = fallback.error;
+      }
 
       if (error) {
         setStaffFormError(error.message);
@@ -833,16 +893,18 @@ export function SmartAdminDashboard({
         user?: SmartStaffUser;
       } | null;
 
-      if (!res?.success || !res.user) {
+      if (!res?.success) {
         setStaffFormError(res?.error || "Could not create staff user.");
         return;
       }
 
+      const createdUsername = res.user?.username || newStaffUsername.trim();
+      const createdRole = res.user?.role || newStaffRole;
       setNewStaffUsername("");
       setNewStaffFullName("");
       setNewStaffPassword("");
       await loadStaffAccounts();
-      showToast(`Created staff account @${res.user.username} (${res.user.role})`);
+      showToast(`Created staff account @${createdUsername} (${createdRole})`);
     } finally {
       setIsSavingStaff(false);
     }
@@ -855,15 +917,27 @@ export function SmartAdminDashboard({
   ) => {
     if (!staffUser) return;
     const supabase = createClient();
-    const { data } = await supabase.rpc("smart_admin_upsert_staff", {
-      p_admin_user_id: staffUser.user_id,
-      p_target_user_id: member.user_id,
+    let { data, error } = await supabase.rpc("smart_admin_upsert_staff_user", {
+      p_staff_user_id: staffUser.user_id,
       p_username: member.username,
-      p_password: null,
       p_full_name: member.full_name,
       p_role: nextRole,
+      p_password: null,
       p_is_active: nextActive,
     });
+
+    if (error) {
+      const fallback = await supabase.rpc("smart_admin_upsert_staff", {
+        p_admin_user_id: staffUser.user_id,
+        p_target_user_id: member.user_id,
+        p_username: member.username,
+        p_password: null,
+        p_full_name: member.full_name,
+        p_role: nextRole,
+        p_is_active: nextActive,
+      });
+      data = fallback.data;
+    }
 
     const res = data as { success: boolean; error?: string } | null;
     if (res?.success) {
@@ -1094,7 +1168,7 @@ export function SmartAdminDashboard({
     },
     {
       id: "staff",
-      label: `Staff & RBAC (${staffList.length})`,
+      label: `Team & Roles (${staffList.length})`,
       icon: <ShieldCheck className="w-4 h-4" />,
     },
     {
@@ -1791,6 +1865,7 @@ export function SmartAdminDashboard({
                             <input
                               type="number"
                               step="0.01"
+                              disabled={!canManageCatalog}
                               value={draft.srp}
                               onChange={(e) =>
                                 setItemEdits((prev) => ({
@@ -1801,7 +1876,7 @@ export function SmartAdminDashboard({
                                   },
                                 }))
                               }
-                              className={`w-24 h-8 px-2 rounded-lg border font-black tabular-numbers ${
+                              className={`w-24 h-8 px-2 rounded-lg border font-black tabular-numbers disabled:opacity-60 disabled:cursor-not-allowed ${
                                 item.is_custom_price
                                   ? "border-amber-400 bg-amber-50/60 text-amber-950"
                                   : "border-slate-200 bg-white text-slate-900"
@@ -1824,6 +1899,7 @@ export function SmartAdminDashboard({
                             step="1"
                             min="0"
                             max="95"
+                            disabled={!canManageCatalog}
                             value={draft.discount}
                             onChange={(e) =>
                               setItemEdits((prev) => ({
@@ -1834,7 +1910,7 @@ export function SmartAdminDashboard({
                                 },
                               }))
                             }
-                            className="w-20 h-8 px-2 rounded-lg border border-slate-200 bg-white font-bold text-smart-sale tabular-numbers"
+                            className="w-20 h-8 px-2 rounded-lg border border-slate-200 bg-white font-bold text-smart-sale tabular-numbers disabled:opacity-60 disabled:cursor-not-allowed"
                           />
                         </td>
 
@@ -1845,8 +1921,9 @@ export function SmartAdminDashboard({
                         <td className="py-2.5 px-3">
                           <button
                             type="button"
+                            disabled={!canManageCatalog}
                             onClick={() => handleToggleItemB2CHidden(item)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-extrabold cursor-pointer ${
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-extrabold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                               item.is_b2c_hidden
                                 ? "bg-rose-100 text-rose-700"
                                 : "bg-emerald-100 text-emerald-800"
@@ -1868,28 +1945,43 @@ export function SmartAdminDashboard({
 
                         <td className="py-2.5 px-3 text-right">
                           <div className="inline-flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={savingItemId === item.item_id}
-                              onClick={() => handleSaveItemOverride(item)}
-                              className="px-3 py-1.5 rounded-lg bg-smart-teal hover:bg-smart-teal-hover text-white font-black cursor-pointer"
-                            >
-                              {savingItemId === item.item_id
-                                ? "Saving..."
-                                : "Save"}
-                            </button>
-                            {(item.is_custom_price ||
-                              item.is_custom_discount) && (
+                            {canViewCatalog && (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleUnlockItemAutoPricing(item)
-                                }
-                                title="Unlock custom price & revert to automatic category markup rule"
-                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                                onClick={() => setCreatorShareItem(item)}
+                                title="Open Creator Asset & Share Studio (Thumb / View / Raw)"
+                                className="px-2.5 py-1.5 rounded-lg bg-smart-teal-deep hover:bg-smart-teal text-white font-black inline-flex items-center gap-1 cursor-pointer"
                               >
-                                <Unlock className="w-3.5 h-3.5" />
+                                <Sparkles className="w-3.5 h-3.5 text-smart-gold" />
+                                <span>Creator Share</span>
                               </button>
+                            )}
+                            {canManageCatalog && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={savingItemId === item.item_id}
+                                  onClick={() => handleSaveItemOverride(item)}
+                                  className="px-3 py-1.5 rounded-lg bg-smart-teal hover:bg-smart-teal-hover text-white font-black cursor-pointer"
+                                >
+                                  {savingItemId === item.item_id
+                                    ? "Saving..."
+                                    : "Save"}
+                                </button>
+                                {(item.is_custom_price ||
+                                  item.is_custom_discount) && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUnlockItemAutoPricing(item)
+                                    }
+                                    title="Unlock custom price & revert to automatic category markup rule"
+                                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                                  >
+                                    <Unlock className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
@@ -2438,6 +2530,9 @@ export function SmartAdminDashboard({
                 <option value="merchandising">
                   Merchandising &amp; Pricing (Catalog, Markups, Deals, Banners)
                 </option>
+                <option value="content_creator">
+                  Content Creator / Digital Marketer (Asset Studio &amp; Catalog)
+                </option>
                 <option value="fulfillment">
                   Order Fulfillment (Orders &amp; Dispatch Only)
                 </option>
@@ -2498,6 +2593,9 @@ export function SmartAdminDashboard({
                     >
                       <option value="admin">Super Admin</option>
                       <option value="merchandising">Merchandising</option>
+                      <option value="content_creator">
+                        Content Creator / Digital Marketer
+                      </option>
                       <option value="fulfillment">Fulfillment</option>
                     </select>
 
@@ -2773,6 +2871,13 @@ export function SmartAdminDashboard({
         initialMode={printOrderModal?.mode || "both"}
         onClose={() => setPrintOrderModal(null)}
         onUpdateSmartStatus={handleUpdateOrderStatus}
+      />
+
+      {/* Creator Asset & Share Studio Modal */}
+      <SmartCreatorShareModal
+        item={creatorShareItem}
+        isOpen={Boolean(creatorShareItem)}
+        onClose={() => setCreatorShareItem(null)}
       />
     </div>
   );
