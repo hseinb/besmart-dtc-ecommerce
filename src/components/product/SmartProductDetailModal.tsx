@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  Download,
   Check,
   Ruler,
   Layers,
@@ -34,8 +35,12 @@ import { useSmartCartStore } from "@/store/useSmartCartStore";
 import { useSmartWishlistStore } from "@/store/useSmartWishlistStore";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
 import {
+  CreatorImageQuality,
+  CreatorImageSlot,
+  getItemCreatorGallerySlots,
   getItemGalleryUrls,
   getItemImageUrl,
+  getProxiedMediaBlobUrl,
   canAccessCreatorStudio,
 } from "@/lib/media";
 import { resolveRetailPrice, resolveConsumerStockStatus } from "@/lib/pricing";
@@ -70,6 +75,12 @@ export function SmartProductDetailModal({
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
+  const [inlineQuality, setInlineQuality] =
+    useState<CreatorImageQuality>("view");
+  const [isDownloadingInline, setIsDownloadingInline] = useState(false);
+  const [inlineDownloadHint, setInlineDownloadHint] = useState<string | null>(
+    null
+  );
   const [isZoomedIn, setIsZoomedIn] = useState(false);
   const [orderQty, setOrderQty] = useState(1);
   const [addedFeedback, setAddedFeedback] = useState(false);
@@ -334,6 +345,108 @@ export function SmartProductDetailModal({
     }
   };
 
+  const rawCreatorSlots = getItemCreatorGallerySlots(selectedProduct);
+  const creatorSlots: CreatorImageSlot[] =
+    rawCreatorSlots.length > 0
+      ? rawCreatorSlots
+      : [
+          {
+            slotKey: "hero1",
+            label: "Main Hero",
+            thumbUrl: getItemImageUrl(selectedProduct, "view"),
+            viewUrl: getItemImageUrl(selectedProduct, "view"),
+            rawUrl: getItemImageUrl(selectedProduct, "view"),
+            proxiedRawUrl: getItemImageUrl(selectedProduct, "view"),
+            isRawGoogleDrive: false,
+          },
+        ];
+
+  const activeCreatorSlot =
+    creatorSlots[activeImageIndex] || creatorSlots[0] || null;
+
+  const downloadSingleCreatorSlot = async (
+    slot: CreatorImageSlot,
+    tier: CreatorImageQuality
+  ) => {
+    const rawTargetUrl =
+      tier === "thumb"
+        ? slot.thumbUrl || slot.viewUrl || slot.rawUrl
+        : tier === "view"
+        ? slot.viewUrl || slot.thumbUrl || slot.rawUrl
+        : slot.rawUrl || slot.viewUrl || slot.thumbUrl;
+    const proxiedUrl = getProxiedMediaBlobUrl(rawTargetUrl);
+    const safeCode = (selectedProduct.code || "ITEM").replace(
+      /[^a-zA-Z0-9-_]/g,
+      "_"
+    );
+
+    try {
+      const response = await fetch(proxiedUrl, { mode: "cors" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      const mime = (blob.type || "").toLowerCase();
+      const ext = mime.includes("png")
+        ? "png"
+        : mime.includes("jpeg") || mime.includes("jpg")
+        ? "jpg"
+        : "webp";
+      const filename = `${safeCode}_${slot.slotKey}_${tier}.${ext}`;
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 3000);
+      return filename;
+    } catch {
+      const link = document.createElement("a");
+      link.href = rawTargetUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.download = `${safeCode}_${slot.slotKey}_${tier}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return `${safeCode}_${slot.slotKey}_${tier}`;
+    }
+  };
+
+  const handleInlineDownloadSingle = async () => {
+    if (!activeCreatorSlot) return;
+    setIsDownloadingInline(true);
+    setInlineDownloadHint(null);
+    try {
+      const filename = await downloadSingleCreatorSlot(
+        activeCreatorSlot,
+        inlineQuality
+      );
+      setInlineDownloadHint(`Saved ${filename}`);
+      setTimeout(() => setInlineDownloadHint(null), 3500);
+    } finally {
+      setIsDownloadingInline(false);
+    }
+  };
+
+  const handleInlineDownloadAll = async () => {
+    if (creatorSlots.length === 0) return;
+    setIsDownloadingInline(true);
+    setInlineDownloadHint(null);
+    try {
+      for (let i = 0; i < creatorSlots.length; i++) {
+        await downloadSingleCreatorSlot(creatorSlots[i], inlineQuality);
+        await new Promise((r) => setTimeout(r, 260));
+      }
+      setInlineDownloadHint(
+        `Saved all ${creatorSlots.length} angles (${inlineQuality.toUpperCase()})`
+      );
+      setTimeout(() => setInlineDownloadHint(null), 3500);
+    } finally {
+      setIsDownloadingInline(false);
+    }
+  };
+
   const bundleTotalPrice =
     pricing.finalUnitPrice +
     frequentlyBought.reduce(
@@ -379,10 +492,10 @@ export function SmartProductDetailModal({
                   type="button"
                   onClick={() => setIsCreatorModalOpen(true)}
                   className="px-3 py-1.5 rounded-full bg-smart-teal-deep hover:bg-smart-teal text-white text-xs font-black flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                  title="Creator Studio (Thumb / View / Raw)"
+                  title="Download / Share Images (Thumb / View / Raw)"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-smart-gold" />
-                  <span>Creator Studio (Thumb / View / Raw)</span>
+                  <Download className="w-3.5 h-3.5 text-smart-gold" />
+                  <span>Download / Share Images</span>
                 </button>
               )}
 
@@ -525,6 +638,116 @@ export function SmartProductDetailModal({
                         </button>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* Inline Content Creator Image Download & Share Card */}
+                {showCreatorBtn && (
+                  <div className="p-3.5 rounded-2xl bg-slate-900 text-white border border-smart-gold/40 shadow-md space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-xs font-black text-smart-gold">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Content Creator Image Download &amp; Share</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-white/75">
+                        {activeCreatorSlot?.label || "Main Hero"} (
+                        {activeImageIndex + 1}/{creatorSlots.length})
+                      </span>
+                    </div>
+
+                    {/* Segmented Quality Selector: Thumb | View | Raw */}
+                    <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-white/10 text-[11px] font-black">
+                      {(
+                        [
+                          { id: "thumb", label: "Thumb", sub: "Fast WebP" },
+                          { id: "view", label: "View", sub: "HD WebP" },
+                          { id: "raw", label: "Raw", sub: "Master" },
+                        ] as const
+                      ).map((tier) => {
+                        const isSelected = inlineQuality === tier.id;
+                        return (
+                          <button
+                            key={tier.id}
+                            type="button"
+                            onClick={() => setInlineQuality(tier.id)}
+                            className={`py-1.5 px-2 rounded-lg transition-all cursor-pointer flex flex-col items-center leading-tight ${
+                              isSelected
+                                ? "bg-smart-gold text-slate-950 shadow-xs"
+                                : "text-white/80 hover:text-white hover:bg-white/10"
+                            }`}
+                          >
+                            <span>{tier.label}</span>
+                            <span
+                              className={`text-[9px] font-bold ${
+                                isSelected ? "text-slate-800" : "text-white/55"
+                              }`}
+                            >
+                              {tier.sub}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* One-Click Download Buttons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={isDownloadingInline}
+                        onClick={handleInlineDownloadSingle}
+                        className="h-9 px-3 rounded-xl bg-smart-teal hover:bg-smart-teal-hover disabled:opacity-50 text-white text-[11px] font-black flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        {isDownloadingInline ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-smart-gold" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5 text-smart-gold" />
+                        )}
+                        <span>
+                          Download Current ({inlineQuality.toUpperCase()})
+                        </span>
+                      </button>
+
+                      {creatorSlots.length > 1 ? (
+                        <button
+                          type="button"
+                          disabled={isDownloadingInline}
+                          onClick={handleInlineDownloadAll}
+                          className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 disabled:opacity-50 text-white text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-smart-gold" />
+                          <span>
+                            Download All {creatorSlots.length} (
+                            {inlineQuality.toUpperCase()})
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setIsCreatorModalOpen(true)}
+                          className="h-9 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-smart-gold" />
+                          <span>Caption &amp; Share Studio</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {creatorSlots.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCreatorModalOpen(true)}
+                        className="w-full h-8 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-smart-gold text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Open Full Caption &amp; Share Studio</span>
+                      </button>
+                    )}
+
+                    {inlineDownloadHint && (
+                      <p className="text-[11px] font-bold text-emerald-300 text-center">
+                        ✓ {inlineDownloadHint}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

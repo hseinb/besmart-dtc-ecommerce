@@ -186,9 +186,45 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
           get().fetchCustomerOrders(),
         ]);
       } else {
-        // Account was deactivated or deleted
-        get().signOut();
+        // Account was deactivated or deleted — clear ONLY customer session, never staffUser
+        try {
+          window.localStorage.removeItem(CUSTOMER_SESSION_KEY);
+        } catch {}
+        set({ customer: null, addresses: [], customerOrders: [] });
       }
+    }
+
+    if (savedStaff?.user_id) {
+      try {
+        const supabase = createClient();
+        const { data: staffData, error: staffError } = await supabase.rpc(
+          "smart_verify_staff_session",
+          {
+            p_user_id: savedStaff.user_id,
+          }
+        );
+
+        if (!staffError && staffData) {
+          const res = staffData as {
+            success?: boolean;
+            user?: SmartStaffUser;
+          };
+          if (res.success && res.user) {
+            try {
+              window.localStorage.setItem(
+                STAFF_SESSION_KEY,
+                JSON.stringify(res.user)
+              );
+            } catch {}
+            set({ staffUser: res.user });
+          } else if (res.success === false) {
+            try {
+              window.localStorage.removeItem(STAFF_SESSION_KEY);
+            } catch {}
+            set({ staffUser: null });
+          }
+        }
+      } catch {}
     }
   },
 
@@ -228,6 +264,7 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
 
       if (typeof window !== "undefined") {
         try {
+          window.localStorage.removeItem(CUSTOMER_SESSION_KEY);
           window.localStorage.setItem(
             STAFF_SESSION_KEY,
             JSON.stringify(res.user)
@@ -235,7 +272,12 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
         } catch {}
       }
 
-      set({ staffUser: res.user });
+      set({
+        staffUser: res.user,
+        customer: null,
+        addresses: [],
+        customerOrders: [],
+      });
       return { success: true, user: res.user };
     } catch (err) {
       return {
@@ -279,13 +321,20 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
         if (res?.success && res.user) {
           if (typeof window !== "undefined") {
             try {
+              window.localStorage.removeItem(CUSTOMER_SESSION_KEY);
               window.localStorage.setItem(
                 STAFF_SESSION_KEY,
                 JSON.stringify(res.user)
               );
             } catch {}
           }
-          set({ staffUser: res.user, isLoadingAuth: false });
+          set({
+            staffUser: res.user,
+            customer: null,
+            addresses: [],
+            customerOrders: [],
+            isLoadingAuth: false,
+          });
           return {
             success: true,
             accountType: "staff",
@@ -379,13 +428,14 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
       const customer = res.customer;
       if (typeof window !== "undefined") {
         try {
+          window.localStorage.removeItem(STAFF_SESSION_KEY);
           window.localStorage.setItem(
             CUSTOMER_SESSION_KEY,
             JSON.stringify(customer)
           );
         } catch {}
       }
-      set({ customer });
+      set({ customer, staffUser: null });
 
       // Merge guest wishlist and cart
       try {
@@ -430,11 +480,16 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
   },
 
   signInCustomerWithPassword: async (phone, password) => {
-    const normalizedPhone = normalizeSmartPhone(phone);
-    if (normalizedPhone.length < 8) {
+    const rawTrimmed = phone.trim();
+    const hasLetters = /[a-zA-Z]/.test(rawTrimmed);
+    const identifierToSend = hasLetters
+      ? rawTrimmed
+      : normalizeSmartPhone(rawTrimmed);
+
+    if (!hasLetters && identifierToSend.length < 8) {
       return {
         success: false,
-        errorMessage: "Please enter a valid mobile phone number.",
+        errorMessage: "Please enter a valid mobile phone number or username.",
       };
     }
     if (!password) {
@@ -448,7 +503,7 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
     try {
       const supabase = createClient();
       const { data, error } = await supabase.rpc("smart_authenticate_customer", {
-        p_phone: normalizedPhone,
+        p_phone: identifierToSend,
         p_password: password,
       });
 
@@ -472,13 +527,14 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
       const customer = res.customer;
       if (typeof window !== "undefined") {
         try {
+          window.localStorage.removeItem(STAFF_SESSION_KEY);
           window.localStorage.setItem(
             CUSTOMER_SESSION_KEY,
             JSON.stringify(customer)
           );
         } catch {}
       }
-      set({ customer });
+      set({ customer, staffUser: null });
 
       // Merge guest wishlist and cart
       try {
@@ -632,13 +688,14 @@ export const useSmartAuthStore = create<SmartAuthState>((set, get) => ({
       const customer = res.customer;
       if (typeof window !== "undefined") {
         try {
+          window.localStorage.removeItem(STAFF_SESSION_KEY);
           window.localStorage.setItem(
             CUSTOMER_SESSION_KEY,
             JSON.stringify(customer)
           );
         } catch {}
       }
-      set({ customer, isLoadingAuth: false });
+      set({ customer, staffUser: null, isLoadingAuth: false });
 
       // Merge guest wishlist and cart
       try {

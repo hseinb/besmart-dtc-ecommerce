@@ -31,6 +31,7 @@ import {
   FileText,
   PackageCheck,
   Sparkles,
+  Download,
 } from "lucide-react";
 import {
   ItemClass,
@@ -56,7 +57,7 @@ import {
   PrintDocMode,
 } from "@/components/admin/SmartOrderPrintModal";
 import { SmartCreatorShareModal } from "@/components/product/SmartCreatorShareModal";
-import { getItemImageUrl } from "@/lib/media";
+import { getItemImageUrl, getItemCreatorGallerySlots } from "@/lib/media";
 
 type AdminSubTab =
   | "orders"
@@ -177,10 +178,11 @@ export function SmartAdminDashboard({
     useState<SmartAppSettings>(appSettings);
 
   const isAdminRole = staffUser?.role === "admin";
+  const isContentCreatorRole = staffUser?.role === "content_creator";
   const canManageCatalog =
     isAdminRole || staffUser?.role === "merchandising";
   const canViewCatalog =
-    canManageCatalog || staffUser?.role === "content_creator";
+    canManageCatalog || isContentCreatorRole;
 
   useEffect(() => {
     setSettingsDraft(appSettings);
@@ -1143,8 +1145,14 @@ export function SmartAdminDashboard({
     },
     {
       id: "catalog",
-      label: "B2C Catalog Overrides",
-      icon: <Tag className="w-4 h-4" />,
+      label: isContentCreatorRole
+        ? "Product Images & Captions Studio"
+        : "B2C Catalog Overrides",
+      icon: isContentCreatorRole ? (
+        <Sparkles className="w-4 h-4 text-smart-gold" />
+      ) : (
+        <Tag className="w-4 h-4" />
+      ),
     },
     {
       id: "coupons",
@@ -1196,7 +1204,9 @@ export function SmartAdminDashboard({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded-full bg-smart-gold text-slate-950 text-[10px] font-black uppercase tracking-wider">
-                B&apos;s Mart B2C Admin
+                {isContentCreatorRole
+                  ? "Content Creator / Digital Marketer"
+                  : "B's Mart B2C Admin"}
               </span>
               <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-white text-[10px] font-extrabold uppercase">
                 {staffUser.full_name} (@{staffUser.username} • {staffUser.role})
@@ -1209,12 +1219,25 @@ export function SmartAdminDashboard({
               )}
             </div>
             <h1 className="text-xl sm:text-2xl font-black mt-1">
-              B2C Pricing, Catalog, Orders &amp; Access Control Center
+              {isContentCreatorRole
+                ? "Product Image Downloader (Thumb / View / Raw) & Social Caption Studio"
+                : "B2C Pricing, Catalog, Orders & Access Control Center"}
             </h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+          {isContentCreatorRole && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("home")}
+              className="px-3.5 py-2.5 rounded-xl bg-smart-gold hover:bg-smart-gold-hover text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Browse Storefront</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={loadAdminData}
@@ -1773,12 +1796,17 @@ export function SmartAdminDashboard({
 
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
               {(
-                [
-                  { id: "ALL", label: "All B2C Items" },
-                  { id: "CUSTOM_PRICE", label: "🔒 Custom Price Locked" },
-                  { id: "ON_SALE", label: "🔥 On B2C Sale" },
-                  { id: "HIDDEN", label: "🚫 Hidden in B2C" },
-                ] as const
+                isContentCreatorRole
+                  ? ([
+                      { id: "ALL", label: "All Products" },
+                      { id: "ON_SALE", label: "🔥 On Sale / Deals" },
+                    ] as const)
+                  : ([
+                      { id: "ALL", label: "All B2C Items" },
+                      { id: "CUSTOM_PRICE", label: "🔒 Custom Price Locked" },
+                      { id: "ON_SALE", label: "🔥 On B2C Sale" },
+                      { id: "HIDDEN", label: "🚫 Hidden in B2C" },
+                    ] as const)
               ).map((f) => (
                 <button
                   key={f.id}
@@ -1805,15 +1833,26 @@ export function SmartAdminDashboard({
             <div className="overflow-x-auto border border-slate-200/80 rounded-2xl">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-black uppercase text-slate-500">
-                  <tr>
-                    <th className="py-3 px-3">Product</th>
-                    <th className="py-3 px-3">B2B Base SRP</th>
-                    <th className="py-3 px-3">B2C Retail Price ($)</th>
-                    <th className="py-3 px-3">B2C Discount (%)</th>
-                    <th className="py-3 px-3">Final Shopper Price</th>
-                    <th className="py-3 px-3">B2C Visibility</th>
-                    <th className="py-3 px-3 text-right">Actions</th>
-                  </tr>
+                  {isContentCreatorRole ? (
+                    <tr>
+                      <th className="py-3 px-3">Product &amp; SKU</th>
+                      <th className="py-3 px-3">Available Image Angles</th>
+                      <th className="py-3 px-3">B2C Shopper Price</th>
+                      <th className="py-3 px-3 text-right">
+                        Download &amp; Share (Thumb / View / Raw)
+                      </th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th className="py-3 px-3">Product</th>
+                      <th className="py-3 px-3">B2B Base SRP</th>
+                      <th className="py-3 px-3">B2C Retail Price ($)</th>
+                      <th className="py-3 px-3">B2C Discount (%)</th>
+                      <th className="py-3 px-3">Final Shopper Price</th>
+                      <th className="py-3 px-3">B2C Visibility</th>
+                      <th className="py-3 px-3 text-right">Actions</th>
+                    </tr>
+                  )}
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {catalogItems.map((item) => {
@@ -1828,17 +1867,107 @@ export function SmartAdminDashboard({
                         ? draftSrp * (1 - draftDisc / 100)
                         : draftSrp;
 
+                    if (isContentCreatorRole) {
+                      const creatorSlots = getItemCreatorGallerySlots(item);
+                      return (
+                        <tr
+                          key={item.item_id}
+                          onClick={() => setCreatorShareItem(item)}
+                          className="hover:bg-slate-50/90 cursor-pointer transition-colors"
+                        >
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={getItemImageUrl(item, "thumb")}
+                                alt={item.item_name}
+                                className="w-12 h-12 rounded-xl object-cover bg-slate-100 border border-slate-200 shrink-0"
+                              />
+                              <div className="max-w-[280px]">
+                                <p className="font-black text-slate-900 hover:text-smart-teal truncate">
+                                  {item.item_name}
+                                </p>
+                                <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
+                                  <span>SKU: {item.code}</span>
+                                  {item.material && (
+                                    <span>• {item.material}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {creatorSlots.length > 0 ? (
+                                creatorSlots.map((slot) => (
+                                  <span
+                                    key={slot.slotKey}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 border border-slate-200/80 text-[10px] font-bold text-slate-700"
+                                  >
+                                    <img
+                                      src={slot.thumbUrl}
+                                      alt={slot.label}
+                                      className="w-4 h-4 rounded object-cover"
+                                    />
+                                    <span>{slot.label}</span>
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-[11px] text-slate-400">
+                                  1 Default Image
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-smart-teal text-sm tabular-numbers">
+                                ${finalConsumerPrice.toFixed(2)}
+                              </span>
+                              {draftDisc > 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-smart-sale/10 text-smart-sale text-[10px] font-black">
+                                  -{draftDisc.toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCreatorShareItem(item);
+                              }}
+                              className="px-3.5 py-2 rounded-xl bg-smart-teal-deep hover:bg-smart-teal text-white font-black inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                            >
+                              <Download className="w-3.5 h-3.5 text-smart-gold" />
+                              <span>
+                                Download / Share Images (Thumb • View • Raw)
+                              </span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+
                     return (
                       <tr key={item.item_id} className="hover:bg-slate-50/80">
                         <td className="py-2.5 px-3">
-                          <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setCreatorShareItem(item)}
+                            title="Click to open Creator Image & Caption Studio"
+                            className="flex items-center gap-2.5 text-left group cursor-pointer"
+                          >
                             <img
                               src={getItemImageUrl(item, "thumb")}
                               alt={item.item_name}
-                              className="w-10 h-10 rounded-lg object-cover bg-slate-100 border border-slate-200 shrink-0"
+                              className="w-10 h-10 rounded-lg object-cover bg-slate-100 border border-slate-200 group-hover:border-smart-teal shrink-0"
                             />
                             <div className="max-w-[230px]">
-                              <p className="font-black text-slate-900 truncate">
+                              <p className="font-black text-slate-900 group-hover:text-smart-teal truncate">
                                 {item.item_name}
                               </p>
                               <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
@@ -1846,7 +1975,7 @@ export function SmartAdminDashboard({
                                 <span>• Stock: {Number(item.qtty)}</span>
                               </div>
                             </div>
-                          </div>
+                          </button>
                         </td>
 
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-500">
@@ -1952,8 +2081,8 @@ export function SmartAdminDashboard({
                                 title="Open Creator Asset & Share Studio (Thumb / View / Raw)"
                                 className="px-2.5 py-1.5 rounded-lg bg-smart-teal-deep hover:bg-smart-teal text-white font-black inline-flex items-center gap-1 cursor-pointer"
                               >
-                                <Sparkles className="w-3.5 h-3.5 text-smart-gold" />
-                                <span>Creator Share</span>
+                                <Download className="w-3.5 h-3.5 text-smart-gold" />
+                                <span>Images</span>
                               </button>
                             )}
                             {canManageCatalog && (

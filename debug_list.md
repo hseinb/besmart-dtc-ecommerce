@@ -11,6 +11,21 @@ This file tracks bugs, UI glitches, sync issues, and platform discrepancies acro
 
 ## Resolved Issues
 
+### BUG-007: Content Creator (`bissan`) Cannot Access Item Image Downloading on Desktop Browser
+- **Status**: `Resolved`
+- **Description & Reproduction Steps**:
+  1. Sign in as `bissan` (`role = 'content_creator'`) on a desktop browser via the `Me` tab / header Sign In form.
+  2. Upon signing in, or when browsing items on the storefront / dashboard, the user cannot access or see the item image downloading controls (`Thumb` / `View` / `Raw`).
+- **Root Causes**:
+  1. **Session Collision & `hydrate()` Wipe ([src/store/useSmartAuthStore.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/store/useSmartAuthStore.ts))**: Signing in as staff (`bissan`) did not clear an existing `customer` session (`bsmart_customer_session_v1`), and if a stale/deleted `savedCustomer` existed in `localStorage`, `hydrate()` called `get().signOut()`, wiping `bsmart_staff_session_v1` (`staffUser: null`). Additionally, `hydrate()` never refreshed `savedStaff` role/status from Supabase.
+  2. **`SmartAdminDashboard.tsx` Rendered Disabled B2B/B2C Pricing Table for `content_creator` ([src/components/admin/SmartAdminDashboard.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/admin/SmartAdminDashboard.tsx))**: Signing in as `bissan` redirected to `SmartAdminDashboard`, which locked `content_creator` to `"B2C Catalog Overrides"` — a 7-column B2B/B2C pricing table where all inputs were disabled (`not-allowed`), product rows/thumbnails were not clickable, and no direct `Thumb` / `View` / `Raw` image download buttons were shown.
+  3. **Lack of Inline Image Download Bar in `SmartProductDetailModal.tsx` & `SmartProductCard.tsx` ([src/components/product/SmartProductDetailModal.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductDetailModal.tsx) & [src/components/product/SmartProductCard.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductCard.tsx))**: Opening an item on the storefront showed no inline `Thumb` / `View` / `Raw` download & share panel under the product image, and product cards only showed a small icon-only sparkle circle without a Download icon/label.
+- **Resolution**:
+  1. Updated [src/store/useSmartAuthStore.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/store/useSmartAuthStore.ts) so `hydrate()` only clears `CUSTOMER_SESSION_KEY` when a customer account is inactive (preserving `staffUser`), refreshes `savedStaff` live from Supabase, and ensures `signInStaff` / `signInUnified` and customer sign-in clear conflicting sessions.
+  2. Added an inline **Content Creator Image Download & Share** card directly below the product image gallery in [SmartProductDetailModal.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductDetailModal.tsx) with segmented `Thumb` | `View` | `Raw` quality selection, one-click Download Current Image, Download All Angles, and Open Full Caption & Share Studio buttons.
+  3. Upgraded the product card button in [SmartProductCard.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductCard.tsx) to a clear `<Download /> Images` pill button.
+  4. Updated [SmartAdminDashboard.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/admin/SmartAdminDashboard.tsx) so `content_creator` sees a dedicated **Product Images & Captions Studio** view with clickable rows, available angle badges (`Main Hero`, `Dimensions`, `Angle 1`–`5`), and a prominent `Download / Share Images (Thumb • View • Raw)` button.
+
 ### BUG-006: Submitted B's Mart Orders Not Appearing on Warehouse Stations (`smart_mirror_order_to_b2b` Failure)
 - **Status**: `Resolved`
 - **Description & Reproduction Steps**:

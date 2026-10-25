@@ -34,13 +34,17 @@ const SUPABASE_BASE_URL =
 export function canAccessCreatorStudio(
   staffUser: { role?: string; is_active?: boolean } | null | undefined
 ): boolean {
-  return Boolean(
-    staffUser &&
-      staffUser.is_active !== false &&
-      ["content_creator", "merchandising", "admin"].includes(
-        staffUser.role || ""
-      )
-  );
+  if (!staffUser || staffUser.is_active === false) return false;
+  const role = String(staffUser.role || "")
+    .trim()
+    .toLowerCase();
+  return [
+    "content_creator",
+    "merchandising",
+    "admin",
+    "marketing",
+    "creator",
+  ].includes(role);
 }
 
 export function getProxiedMediaBlobUrl(url: string): string {

@@ -1,7 +1,15 @@
 "use client";
 
 import React from "react";
-import { Heart, ShoppingBag, Plus, Minus, Zap, Sparkles } from "lucide-react";
+import {
+  Heart,
+  ShoppingBag,
+  Plus,
+  Minus,
+  Zap,
+  Sparkles,
+  Download,
+} from "lucide-react";
 import { ItemWithImages } from "@/types/smart.types";
 import { getItemImageUrl, canAccessCreatorStudio } from "@/lib/media";
 import { resolveRetailPrice, resolveConsumerStockStatus } from "@/lib/pricing";
@@ -140,7 +148,7 @@ export function SmartProductCard({
             />
           </button>
 
-          {/* Creator Studio Button (Only visible to signed-in content_creator / merchandising / admin staff) */}
+          {/* Creator Studio Pill Button (Only visible to signed-in content_creator / merchandising / admin staff) */}
           {showCreatorBtn && (
             <button
               type="button"
@@ -148,11 +156,12 @@ export function SmartProductCard({
                 e.stopPropagation();
                 setIsCreatorModalOpen(true);
               }}
-              title="Open Creator Studio (Thumb / View / Raw)"
-              aria-label="Open Creator Studio"
-              className="absolute top-11 right-2 z-10 w-8 h-8 rounded-full bg-smart-teal-deep/90 hover:bg-smart-teal text-smart-gold border border-white/25 flex items-center justify-center shadow-sm transition-transform active:scale-90 cursor-pointer"
+              title="Download / Share Product Images (Thumb / View / Raw)"
+              aria-label="Download or Share Product Images"
+              className="absolute bottom-2 left-2 z-10 px-2.5 py-1.5 rounded-full bg-smart-teal-deep/95 hover:bg-smart-teal text-white border border-smart-gold/50 shadow-md flex items-center gap-1 text-[11px] font-black transition-transform active:scale-95 cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5" />
+              <Download className="w-3 h-3 text-smart-gold" />
+              <span>Images</span>
             </button>
           )}
 
