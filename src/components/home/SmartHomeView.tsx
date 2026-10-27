@@ -279,8 +279,8 @@ export function SmartHomeView({
     async function loadFlashDeals() {
       const supabase = createClient();
       const selectClause = appSettings.require_images
-        ? "*, item_images!inner(*)"
-        : "*, item_images(*)";
+        ? "*, item_images:smart_item_images!inner(*)"
+        : "*, item_images:smart_item_images(*)";
       let q = supabase
         .from("smart_items")
         .select(selectClause)
@@ -341,8 +341,8 @@ export function SmartHomeView({
       try {
         const supabase = createClient();
         const selectClause = appSettings.require_images
-          ? "*, item_images!inner(*)"
-          : "*, item_images(*)";
+          ? "*, item_images:smart_item_images!inner(*)"
+          : "*, item_images:smart_item_images(*)";
 
         let query = supabase
           .from("smart_items")

@@ -31,6 +31,7 @@ import {
   SmartDeliveryZone,
 } from "@/types/smart.types";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import { useSmartCartStore } from "@/store/useSmartCartStore";
 import { useSmartWishlistStore } from "@/store/useSmartWishlistStore";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
@@ -59,6 +60,8 @@ export function SmartProductDetailModal({
 }: SmartProductDetailModalProps) {
   const {
     selectedProduct,
+    productHistory,
+    stepBackProductDetail,
     closeProductDetail,
     openProductDetail,
     setActiveTab,
@@ -85,6 +88,15 @@ export function SmartProductDetailModal({
   const [orderQty, setOrderQty] = useState(1);
   const [addedFeedback, setAddedFeedback] = useState(false);
   const [shareFeedback, setShareFeedback] = useState(false);
+
+  // Intercept phone Back button when Lightbox Zoom or Creator Share Modal is open
+  useSmartBackGuard(isLightboxOpen, () => {
+    setIsLightboxOpen(false);
+    setIsZoomedIn(false);
+  });
+  useSmartBackGuard(isCreatorModalOpen, () => {
+    setIsCreatorModalOpen(false);
+  });
 
   const swipeStartXRef = useRef<number | null>(null);
   const swipeStartYRef = useRef<number | null>(null);
@@ -468,6 +480,22 @@ export function SmartProductDetailModal({
           {/* Sticky Modal Top Bar */}
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2 bg-white/95 backdrop-blur-xs shrink-0">
             <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={stepBackProductDetail}
+                aria-label="Go back"
+                title={
+                  productHistory.length > 0
+                    ? "Back to previous product"
+                    : "Back to catalog"
+                }
+                className="px-2.5 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>
+                  {productHistory.length > 0 ? "Back" : "Back"}
+                </span>
+              </button>
               {categoryName && (
                 <button
                   type="button"

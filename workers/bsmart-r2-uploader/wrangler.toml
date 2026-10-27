@@ -1,0 +1,7 @@
+name = "bsmart-r2-uploader"
+main = "index.js"
+compatibility_date = "2024-09-23"
+
+[[r2_buckets]]
+binding = "CATALOG_IMAGES"
+bucket_name = "catalog-images"

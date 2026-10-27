@@ -7,11 +7,14 @@ import {
   Plus,
   Minus,
   Zap,
-  Sparkles,
   Download,
 } from "lucide-react";
 import { ItemWithImages } from "@/types/smart.types";
-import { getItemImageUrl, canAccessCreatorStudio } from "@/lib/media";
+import {
+  getItemImageUrl,
+  getItemGalleryUrls,
+  canAccessCreatorStudio,
+} from "@/lib/media";
 import { resolveRetailPrice, resolveConsumerStockStatus } from "@/lib/pricing";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
 import { useSmartCartStore } from "@/store/useSmartCartStore";
@@ -38,6 +41,140 @@ export function SmartProductCard({
   const showCreatorBtn = canAccessCreatorStudio(staffUser);
   const [isCreatorModalOpen, setIsCreatorModalOpen] = React.useState(false);
 
+  // Extract all unique valid thumbnail/view URLs across hero1, dim1, angle1..5
+  const galleryThumbs = React.useMemo(() => {
+    const slots = getItemGalleryUrls(item);
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    for (const s of slots) {
+      const url = s.thumb || s.view || s.raw;
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        urls.push(url);
+      }
+    }
+    return urls.length > 0 ? urls : [getItemImageUrl(item, "thumb")];
+  }, [item]);
+
+  const [activeImgIdx, setActiveImgIdx] = React.useState(0);
+  const [isCycling, setIsCycling] = React.useState(false);
+
+  const hoverTimeoutRef = React.useRef<number | null>(null);
+  const cycleIntervalRef = React.useRef<number | null>(null);
+  const longPressTimeoutRef = React.useRef<number | null>(null);
+  const touchEndResetTimeoutRef = React.useRef<number | null>(null);
+  const touchStartPosRef = React.useRef<{ x: number; y: number } | null>(null);
+  const didLongPressRef = React.useRef<boolean>(false);
+  const isTouchInteractionRef = React.useRef<boolean>(false);
+  const preloadedRef = React.useRef<boolean>(false);
+
+  const preloadGalleryImages = React.useCallback(() => {
+    if (preloadedRef.current || galleryThumbs.length <= 1 || typeof window === "undefined") {
+      return;
+    }
+    preloadedRef.current = true;
+    for (let i = 1; i < galleryThumbs.length; i++) {
+      const img = new window.Image();
+      img.src = galleryThumbs[i];
+    }
+  }, [galleryThumbs]);
+
+  const clearAllTimers = React.useCallback(() => {
+    if (hoverTimeoutRef.current !== null) {
+      window.clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    if (cycleIntervalRef.current !== null) {
+      window.clearInterval(cycleIntervalRef.current);
+      cycleIntervalRef.current = null;
+    }
+    if (longPressTimeoutRef.current !== null) {
+      window.clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  }, []);
+
+  const stopCyclingAndReset = React.useCallback(() => {
+    clearAllTimers();
+    setIsCycling(false);
+    setActiveImgIdx(0);
+  }, [clearAllTimers]);
+
+  React.useEffect(() => {
+    setActiveImgIdx(0);
+    setIsCycling(false);
+    preloadedRef.current = false;
+    return () => {
+      clearAllTimers();
+      if (touchEndResetTimeoutRef.current !== null) {
+        window.clearTimeout(touchEndResetTimeoutRef.current);
+      }
+    };
+  }, [item.item_id, clearAllTimers]);
+
+  const handleMouseEnter = () => {
+    if (isTouchInteractionRef.current || galleryThumbs.length <= 1) return;
+    preloadGalleryImages();
+    clearAllTimers();
+
+    hoverTimeoutRef.current = window.setTimeout(() => {
+      setIsCycling(true);
+      setActiveImgIdx((prev) => (prev + 1) % galleryThumbs.length);
+      cycleIntervalRef.current = window.setInterval(() => {
+        setActiveImgIdx((prev) => (prev + 1) % galleryThumbs.length);
+      }, 1000);
+    }, 200);
+  };
+
+  const handleMouseLeave = () => {
+    if (isTouchInteractionRef.current) return;
+    stopCyclingAndReset();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    isTouchInteractionRef.current = true;
+    if (touchEndResetTimeoutRef.current !== null) {
+      window.clearTimeout(touchEndResetTimeoutRef.current);
+      touchEndResetTimeoutRef.current = null;
+    }
+    didLongPressRef.current = false;
+
+    if (galleryThumbs.length <= 1 || e.touches.length !== 1) return;
+    touchStartPosRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+    };
+    preloadGalleryImages();
+    clearAllTimers();
+
+    longPressTimeoutRef.current = window.setTimeout(() => {
+      didLongPressRef.current = true;
+      setIsCycling(true);
+      setActiveImgIdx((prev) => (prev + 1) % galleryThumbs.length);
+      cycleIntervalRef.current = window.setInterval(() => {
+        setActiveImgIdx((prev) => (prev + 1) % galleryThumbs.length);
+      }, 950);
+    }, 320);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartPosRef.current || e.touches.length !== 1) return;
+    const dx = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
+    const dy = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
+    if (dx > 10 || dy > 10) {
+      touchStartPosRef.current = null;
+      stopCyclingAndReset();
+    }
+  };
+
+  const handleTouchEndOrCancel = () => {
+    touchStartPosRef.current = null;
+    stopCyclingAndReset();
+    touchEndResetTimeoutRef.current = window.setTimeout(() => {
+      isTouchInteractionRef.current = false;
+    }, 400);
+  };
+
   const pricing = resolveRetailPrice(item.srp, item.discount);
   const stockStatus = resolveConsumerStockStatus(
     item.qtty,
@@ -55,6 +192,10 @@ export function SmartProductCard({
   }, [lines, item.item_id]);
 
   const handleOpenDetail = () => {
+    if (didLongPressRef.current) {
+      didLongPressRef.current = false;
+      return;
+    }
     addRecentlyViewed(item);
     openProductDetail(item);
   };
@@ -90,10 +231,24 @@ export function SmartProductCard({
     return parts.length > 0 ? parts[0] : null;
   }, [item.tags]);
 
+  const currentThumbUrl =
+    galleryThumbs[activeImgIdx] || galleryThumbs[0] || getItemImageUrl(item, "thumb");
+
   return (
     <>
       <div
         onClick={handleOpenDetail}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEndOrCancel}
+        onTouchCancel={handleTouchEndOrCancel}
+        onContextMenu={(e) => {
+          if (galleryThumbs.length > 1) {
+            e.preventDefault();
+          }
+        }}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
@@ -107,12 +262,13 @@ export function SmartProductCard({
         {/* Square R2 Thumbnail Container */}
         <div className="relative aspect-square w-full bg-slate-100 overflow-hidden">
           <img
-            src={getItemImageUrl(item, "thumb")}
+            src={currentThumbUrl}
             alt={item.item_name}
             loading={priority ? "eager" : "lazy"}
+            draggable={false}
             width={300}
             height={300}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 select-none pointer-events-none"
           />
 
           {/* Top-Left Badges: Flash Discount % or Real Campaign Tag */}
@@ -163,6 +319,28 @@ export function SmartProductCard({
               <Download className="w-3 h-3 text-smart-gold" />
               <span>Images</span>
             </button>
+          )}
+
+          {/* Multi-Angle Progress Dots (shown when item has >1 images) */}
+          {galleryThumbs.length > 1 && (
+            <div
+              className={`absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950/45 backdrop-blur-xs pointer-events-none transition-opacity duration-200 ${
+                isCycling || activeImgIdx > 0
+                  ? "opacity-100"
+                  : "opacity-70 group-hover:opacity-100"
+              }`}
+            >
+              {galleryThumbs.map((_, idx) => (
+                <span
+                  key={idx}
+                  className={`h-1.5 rounded-full transition-all duration-200 ${
+                    idx === activeImgIdx
+                      ? "w-3.5 bg-smart-gold"
+                      : "w-1.5 bg-white/65"
+                  }`}
+                />
+              ))}
+            </div>
           )}
 
           {/* Out of Stock Overlay (if out of stock is shown) */}

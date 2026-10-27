@@ -72,8 +72,8 @@ export function SplitCategoryExplorer({
       try {
         const supabase = createClient();
         const selectClause = appSettings.require_images
-          ? "*, item_images!inner(*)"
-          : "*, item_images(*)";
+          ? "*, item_images:smart_item_images!inner(*)"
+          : "*, item_images:smart_item_images(*)";
 
         let query = supabase
           .from("smart_items")

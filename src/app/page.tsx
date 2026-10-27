@@ -53,10 +53,10 @@ export default async function HomePage() {
     console.error("Failed to fetch smart_app_settings:", err);
   }
 
-  // 2. Load real categories from public.item_class + representative category thumbnails via RPC
+  // 2. Load real categories from public.smart_item_classes + representative category thumbnails via RPC
   const [{ data: categoriesData }, { data: catThumbsData }] = await Promise.all([
     supabase
-      .from("item_class")
+      .from("smart_item_classes")
       .select("*")
       .order("item_class", { ascending: true }),
     supabase.rpc("smart_get_category_thumbnails"),
@@ -95,7 +95,10 @@ export default async function HomePage() {
   );
   const categories =
     activeClassIds.size > 0
-      ? visibleCats.filter((c) => activeClassIds.has(Number(c.item_class_id)))
+      ? visibleCats.filter(
+          (c) =>
+            activeClassIds.has(Number(c.item_class_id)) || c.is_b2c_exclusive
+        )
       : visibleCats;
 
   // 3. Load real delivery zones from public.smart_delivery_zones
@@ -130,10 +133,10 @@ export default async function HomePage() {
   const banners = (bannersRes.data as SmartBanner[]) || [];
   const collectibleCoupons = (couponsRes.data as SmartCoupon[]) || [];
 
-  // 5. Load initial batch of real B2C catalog items from public.smart_items + item_images
+  // 5. Load initial batch of real B2C catalog items from public.smart_items + smart_item_images
   const selectClause = appSettings.require_images
-    ? "*, item_images!inner(*)"
-    : "*, item_images(*)";
+    ? "*, item_images:smart_item_images!inner(*)"
+    : "*, item_images:smart_item_images(*)";
 
   let itemsQuery = supabase
     .from("smart_items")

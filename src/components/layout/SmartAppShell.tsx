@@ -11,7 +11,11 @@ import {
   SmartCoupon,
   SmartDeliveryZone,
 } from "@/types/smart.types";
-import { useSmartNavStore } from "@/store/useSmartNavStore";
+import {
+  useSmartNavStore,
+  pushBrowserHistoryGuard,
+} from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import {
   useSmartCartStore,
   decodeCartShareParam,
@@ -65,6 +69,7 @@ export function SmartAppShell({
     openProductDetail,
     setAppSettings,
     appSettings,
+    handleBackNavigation,
   } = useSmartNavStore();
 
   const {
@@ -82,6 +87,11 @@ export function SmartAppShell({
   const [sharedBagEntries, setSharedBagEntries] = React.useState<
     SharedBagEntry[] | null
   >(null);
+
+  useSmartBackGuard(
+    Boolean(sharedBagEntries && sharedBagEntries.length > 0),
+    () => setSharedBagEntries(null)
+  );
 
   // Hydrate persisted consumer Bag, Wishlist, Auth stores + live smart_app_settings
   useEffect(() => {
@@ -115,7 +125,7 @@ export function SmartAppShell({
       const supabase = createClient();
       supabase
         .from("smart_items")
-        .select("*, item_images(*)")
+        .select("*, item_images:smart_item_images(*)")
         .eq("item_id", numId)
         .eq("is_active", true)
         .single()
@@ -137,8 +147,8 @@ export function SmartAppShell({
       const itemIds = decodedEntries.map((d) => d.itemId);
       const supabase = createClient();
       const selectClause = appSettings.require_images
-        ? "*, item_images!inner(*)"
-        : "*, item_images(*)";
+        ? "*, item_images:smart_item_images!inner(*)"
+        : "*, item_images:smart_item_images(*)";
 
       let query = supabase
         .from("smart_items")
@@ -205,9 +215,37 @@ export function SmartAppShell({
     }
   }, [handleProductDeepLink, handleCartDeepLink]);
 
-  // Handle Native Capacitor Android App Links / iOS Universal Links & Custom Scheme (bsmart://)
+  // Browser History Sentinel & Mobile Back Button (`popstate`) Interceptor
   useEffect(() => {
-    let listenerHandle: { remove: () => Promise<void> } | null = null;
+    if (typeof window === "undefined") return;
+
+    // Seed root sentinel + guard state so pressing Back on mobile browsers never closes the tab/app
+    try {
+      const currentState = window.history.state;
+      if (!currentState || (!currentState.bsmartRoot && !currentState.bsmartGuard && !currentState.bsmartNav)) {
+        window.history.replaceState({ bsmartRoot: true }, "", window.location.href);
+        window.history.pushState({ bsmartGuard: true }, "", window.location.href);
+      } else if (currentState.bsmartRoot) {
+        window.history.pushState({ bsmartGuard: true }, "", window.location.href);
+      }
+    } catch {}
+
+    const onPopState = () => {
+      handleBackNavigation();
+      // Always keep a guard state armed ahead of bsmartRoot so subsequent Back presses stay in-app
+      pushBrowserHistoryGuard();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [handleBackNavigation]);
+
+  // Handle Native Capacitor Android / iOS Hardware Back Button & App Deep Links
+  useEffect(() => {
+    let urlListenerHandle: { remove: () => Promise<void> } | null = null;
+    let backListenerHandle: { remove: () => Promise<void> } | null = null;
     let isMounted = true;
 
     CapApp.addListener("appUrlOpen", (event) => {
@@ -228,18 +266,33 @@ export function SmartAppShell({
         if (!isMounted) {
           handle.remove().catch(() => {});
         } else {
-          listenerHandle = handle;
+          urlListenerHandle = handle;
+        }
+      })
+      .catch(() => {});
+
+    CapApp.addListener("backButton", () => {
+      handleBackNavigation();
+    })
+      .then((handle) => {
+        if (!isMounted) {
+          handle.remove().catch(() => {});
+        } else {
+          backListenerHandle = handle;
         }
       })
       .catch(() => {});
 
     return () => {
       isMounted = false;
-      if (listenerHandle) {
-        listenerHandle.remove().catch(() => {});
+      if (urlListenerHandle) {
+        urlListenerHandle.remove().catch(() => {});
+      }
+      if (backListenerHandle) {
+        backListenerHandle.remove().catch(() => {});
       }
     };
-  }, [handleProductDeepLink, handleCartDeepLink]);
+  }, [handleProductDeepLink, handleCartDeepLink, handleBackNavigation]);
 
   const bagCount = getTotalUnitCount();
   const wishlistCount = wishlistItems.length;

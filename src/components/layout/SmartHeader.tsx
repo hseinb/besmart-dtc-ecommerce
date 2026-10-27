@@ -21,6 +21,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
 import { ItemClass, ItemWithImages } from "@/types/smart.types";
 import { createClient } from "@/lib/supabase/client";
@@ -65,6 +66,9 @@ export function SmartHeader({
   const pillScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+
+  useSmartBackGuard(isBarcodeLookupOpen, () => setIsBarcodeLookupOpen(false));
+  useSmartBackGuard(isSearchFocused, () => setIsSearchFocused(false));
 
   const visibleCategories = React.useMemo(() => {
     const hidden = new Set((appSettings.hidden_categories || []).map(Number));
@@ -116,8 +120,8 @@ export function SmartHeader({
       try {
         const supabase = createClient();
         const selectClause = appSettings.require_images
-          ? "*, item_images!inner(*)"
-          : "*, item_images(*)";
+          ? "*, item_images:smart_item_images!inner(*)"
+          : "*, item_images:smart_item_images(*)";
 
         let query = supabase
           .from("smart_items")
@@ -179,7 +183,7 @@ export function SmartHeader({
     const supabase = createClient();
     const { data } = await supabase
       .from("smart_items")
-      .select("*, item_images(*)")
+      .select("*, item_images:smart_item_images(*)")
       .eq("is_active", true)
       .or(`code.ilike.${code},upc.eq.${code}`)
       .limit(1);

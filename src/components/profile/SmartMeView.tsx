@@ -33,6 +33,7 @@ import {
   SmartOrderStatus,
 } from "@/types/smart.types";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
 import { useSmartCartStore } from "@/store/useSmartCartStore";
 import { useSmartWishlistStore } from "@/store/useSmartWishlistStore";
@@ -120,6 +121,13 @@ export function SmartMeView({
   // Account Deletion Confirmation State (Apple Guideline 5.1.1(v))
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  useSmartBackGuard(Boolean(activeTrackedOrder), () =>
+    setActiveTrackedOrder(null)
+  );
+  useSmartBackGuard(isOtpModalOpen, () => setIsOtpModalOpen(false));
+  useSmartBackGuard(isAddingAddress, () => setIsAddingAddress(false));
+  useSmartBackGuard(isDeleteConfirmOpen, () => setIsDeleteConfirmOpen(false));
 
   useEffect(() => {
     hydrateAuth();

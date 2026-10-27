@@ -32,9 +32,14 @@ import {
   PackageCheck,
   Sparkles,
   Download,
+  Upload,
+  Edit3,
+  FolderPlus,
+  X,
 } from "lucide-react";
 import {
   ItemClass,
+  ItemImageRecord,
   ItemWithImages,
   SmartAppSettings,
   SmartBanner,
@@ -50,6 +55,7 @@ import {
 } from "@/types/smart.types";
 import { createClient } from "@/lib/supabase/client";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import { useSmartAuthStore } from "@/store/useSmartAuthStore";
 import { SmartOrderTrackerModal } from "@/components/orders/SmartOrderTrackerModal";
 import {
@@ -58,6 +64,21 @@ import {
 } from "@/components/admin/SmartOrderPrintModal";
 import { SmartCreatorShareModal } from "@/components/product/SmartCreatorShareModal";
 import { getItemImageUrl, getItemCreatorGallerySlots } from "@/lib/media";
+import {
+  uploadBsMartSlotToR2,
+  BsMartImageSlotKey,
+  R2SlotJson,
+} from "@/lib/r2Upload";
+
+const BSMART_IMAGE_SLOTS: { key: BsMartImageSlotKey; label: string; hint: string }[] = [
+  { key: "hero1", label: "Main Hero Photo *", hint: "Primary storefront card & cover photo" },
+  { key: "dim1", label: "Dimensions / Spec Photo", hint: "Size diagram or measurement visual" },
+  { key: "angle1", label: "Angle 1", hint: "Secondary angle / perspective" },
+  { key: "angle2", label: "Angle 2", hint: "Lifestyle or room setting" },
+  { key: "angle3", label: "Angle 3", hint: "Close-up texture or detail" },
+  { key: "angle4", label: "Angle 4", hint: "Packaging or accessory view" },
+  { key: "angle5", label: "Angle 5", hint: "Extra gallery angle" },
+];
 
 type AdminSubTab =
   | "orders"
@@ -87,6 +108,12 @@ export function SmartAdminDashboard({
     signInStaff,
     signOutStaff,
   } = useSmartAuthStore();
+
+  // Categories State (initialized from SSR prop, refreshed from public.smart_item_classes)
+  const [classes, setClasses] = useState<ItemClass[]>(categories);
+  useEffect(() => {
+    setClasses(categories);
+  }, [categories]);
 
   // Staff Login Gate Form State
   const [loginUsername, setLoginUsername] = useState("");
@@ -126,7 +153,7 @@ export function SmartAdminDashboard({
   const [catalogItems, setCatalogItems] = useState<ItemWithImages[]>([]);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogFilter, setCatalogFilter] = useState<
-    "ALL" | "CUSTOM_PRICE" | "HIDDEN" | "ON_SALE"
+    "ALL" | "EXCLUSIVE" | "CUSTOM_PRICE" | "HIDDEN" | "ON_SALE"
   >("ALL");
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [itemEdits, setItemEdits] = useState<
@@ -135,6 +162,56 @@ export function SmartAdminDashboard({
   const [savingItemId, setSavingItemId] = useState<number | null>(null);
   const [creatorShareItem, setCreatorShareItem] =
     useState<ItemWithImages | null>(null);
+
+  // 3b. B's Mart Exclusive Category & Item Creation Modals State
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatDesc, setNewCatDesc] = useState("");
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [categoryFormError, setCategoryFormError] = useState<string | null>(null);
+
+  const [isExclusiveItemModalOpen, setIsExclusiveItemModalOpen] = useState(false);
+  const [editingExclusiveItem, setEditingExclusiveItem] =
+    useState<ItemWithImages | null>(null);
+  const [exItemName, setExItemName] = useState("");
+  const [exCode, setExCode] = useState("");
+  const [exClassId, setExClassId] = useState<number>(
+    categories[0]?.item_class_id || 0
+  );
+  const [exSrp, setExSrp] = useState("");
+  const [exDiscount, setExDiscount] = useState("0");
+  const [exQtty, setExQtty] = useState("10");
+  const [exMaterial, setExMaterial] = useState("");
+  const [exHouseRooms, setExHouseRooms] = useState("");
+  const [exLength, setExLength] = useState("");
+  const [exWidth, setExWidth] = useState("");
+  const [exThickness, setExThickness] = useState("");
+  const [exUpc, setExUpc] = useState("");
+  const [exTags, setExTags] = useState("");
+  const [exDescription, setExDescription] = useState("");
+  const [exIsHidden, setExIsHidden] = useState(false);
+  const [exExistingImages, setExExistingImages] = useState<
+    Partial<Record<BsMartImageSlotKey, R2SlotJson | string>>
+  >({});
+  const [exPendingFiles, setExPendingFiles] = useState<
+    Partial<Record<BsMartImageSlotKey, File>>
+  >({});
+  const [exFilePreviews, setExFilePreviews] = useState<
+    Partial<Record<BsMartImageSlotKey, string>>
+  >({});
+  const [exUploadStatus, setExUploadStatus] = useState<string | null>(null);
+  const [isSavingExclusiveItem, setIsSavingExclusiveItem] = useState(false);
+  const [exFormError, setExFormError] = useState<string | null>(null);
+
+  useSmartBackGuard(Boolean(selectedOrderModal), () =>
+    setSelectedOrderModal(null)
+  );
+  useSmartBackGuard(Boolean(printOrderModal), () => setPrintOrderModal(null));
+  useSmartBackGuard(Boolean(creatorShareItem), () => setCreatorShareItem(null));
+  useSmartBackGuard(isCategoryModalOpen, () => setIsCategoryModalOpen(false));
+  useSmartBackGuard(isExclusiveItemModalOpen, () =>
+    setIsExclusiveItemModalOpen(false)
+  );
 
   // 4. Coupons State
   const [coupons, setCoupons] = useState<SmartCoupon[]>([]);
@@ -231,7 +308,7 @@ export function SmartAdminDashboard({
       const supabase = createClient();
       let query = supabase
         .from("smart_items")
-        .select("*, item_images(*)");
+        .select("*, item_images:smart_item_images(*)");
 
       const q = catalogSearch.trim();
       if (q) {
@@ -239,7 +316,9 @@ export function SmartAdminDashboard({
           `item_name.ilike.%${q}%,code.ilike.%${q}%,upc.ilike.%${q}%`
         );
       }
-      if (catalogFilter === "CUSTOM_PRICE") {
+      if (catalogFilter === "EXCLUSIVE") {
+        query = query.eq("is_b2c_exclusive", true);
+      } else if (catalogFilter === "CUSTOM_PRICE") {
         query = query.eq("is_custom_price", true);
       } else if (catalogFilter === "HIDDEN") {
         query = query.eq("is_b2c_hidden", true);
@@ -320,6 +399,7 @@ export function SmartAdminDashboard({
         bannersRes,
         custRes,
         rulesRes,
+        classesRes,
       ] = await Promise.all([
         supabase
           .from("smart_orders")
@@ -346,6 +426,10 @@ export function SmartAdminDashboard({
           .order("created_at", { ascending: false })
           .limit(100),
         supabase.from("smart_pricing_rules").select("*"),
+        supabase
+          .from("smart_item_classes")
+          .select("*")
+          .order("item_class", { ascending: true }),
       ]);
 
       if (ordersRes.data) setOrders(ordersRes.data as SmartOrder[]);
@@ -353,6 +437,7 @@ export function SmartAdminDashboard({
       if (zonesRes.data) setZones(zonesRes.data as SmartDeliveryZone[]);
       if (bannersRes.data) setBanners(bannersRes.data as SmartBanner[]);
       if (custRes.data) setCustomers(custRes.data as SmartCustomer[]);
+      if (classesRes.data) setClasses(classesRes.data as ItemClass[]);
       if (rulesRes.data) {
         const map: Record<number, SmartPricingRule> = {};
         for (const r of rulesRes.data as SmartPricingRule[]) {
@@ -705,6 +790,357 @@ export function SmartAdminDashboard({
       }
     } finally {
       setSavingItemId(null);
+    }
+  };
+
+  // --- B's Mart Exclusive Category & Item Creation / Editing Actions ---
+  const handleCreateExclusiveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!staffUser) return;
+    const trimmedName = newCatName.trim();
+    if (!trimmedName) {
+      setCategoryFormError("Category name is required.");
+      return;
+    }
+
+    setCategoryFormError(null);
+    setIsSavingCategory(true);
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.rpc(
+        "smart_admin_create_category",
+        {
+          p_staff_user_id: staffUser.user_id,
+          p_item_class: trimmedName,
+          p_description: newCatDesc.trim() || null,
+        }
+      );
+
+      const res = data as {
+        success: boolean;
+        category?: ItemClass;
+        error?: string;
+      } | null;
+
+      if (!error && res?.success && res.category) {
+        const created = res.category;
+        setClasses((prev) => {
+          const exists = prev.some(
+            (c) => c.item_class_id === created.item_class_id
+          );
+          const next = exists
+            ? prev.map((c) =>
+                c.item_class_id === created.item_class_id ? created : c
+              )
+            : [...prev, created];
+          return next.sort((a, b) =>
+            a.item_class.localeCompare(b.item_class)
+          );
+        });
+        setExClassId(created.item_class_id);
+        setNewCatName("");
+        setNewCatDesc("");
+        setIsCategoryModalOpen(false);
+        showToast(
+          `Created B's Mart Exclusive Category "${created.item_class}" (#${created.item_class_id})`
+        );
+      } else {
+        setCategoryFormError(
+          res?.error || error?.message || "Failed to create category."
+        );
+      }
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const openCreateExclusiveItemModal = () => {
+    setEditingExclusiveItem(null);
+    setExItemName("");
+    setExCode("");
+    setExClassId(classes[0]?.item_class_id || 0);
+    setExSrp("");
+    setExDiscount("0");
+    setExQtty("10");
+    setExMaterial("");
+    setExHouseRooms("");
+    setExLength("");
+    setExWidth("");
+    setExThickness("");
+    setExUpc("");
+    setExTags("");
+    setExDescription("");
+    setExIsHidden(false);
+    setExExistingImages({});
+    setExPendingFiles({});
+    setExFilePreviews({});
+    setExUploadStatus(null);
+    setExFormError(null);
+    setIsExclusiveItemModalOpen(true);
+  };
+
+  const openEditExclusiveItemModal = (item: ItemWithImages) => {
+    setEditingExclusiveItem(item);
+    setExItemName(item.item_name || "");
+    setExCode(item.code || "");
+    setExClassId(Number(item.class_id) || classes[0]?.item_class_id || 0);
+    setExSrp(String(Number(item.srp || 0).toFixed(2)));
+    setExDiscount(String(Number(item.discount || 0)));
+    setExQtty(String(Math.max(0, Math.floor(Number(item.qtty || 0)))));
+    setExMaterial(item.material || "");
+    setExHouseRooms(item.house_rooms || "");
+    setExLength(item.length !== null && item.length !== undefined ? String(item.length) : "");
+    setExWidth(item.width !== null && item.width !== undefined ? String(item.width) : "");
+    setExThickness(
+      item.thickness !== null && item.thickness !== undefined
+        ? String(item.thickness)
+        : ""
+    );
+    setExUpc(item.upc || "");
+    setExTags(item.tags || "");
+    setExDescription(item.description || "");
+    setExIsHidden(Boolean(item.is_b2c_hidden));
+
+    // Extract existing image slots from item.item_images
+    const rawImgRel = item.item_images;
+    const imgRecord: ItemImageRecord | null = Array.isArray(rawImgRel)
+      ? rawImgRel[0] || null
+      : (rawImgRel as ItemImageRecord | null) || null;
+    const rawImagesObj =
+      (imgRecord?.images as Record<string, unknown> | undefined) || {};
+
+    const extractedExisting: Partial<
+      Record<BsMartImageSlotKey, R2SlotJson | string>
+    > = {};
+    for (const slot of BSMART_IMAGE_SLOTS) {
+      const val =
+        rawImagesObj[slot.key] ??
+        (imgRecord as Record<string, unknown> | null)?.[slot.key];
+      if (val && (typeof val === "string" || typeof val === "object")) {
+        extractedExisting[slot.key] = val as R2SlotJson | string;
+      }
+    }
+
+    setExExistingImages(extractedExisting);
+    setExPendingFiles({});
+    setExFilePreviews({});
+    setExUploadStatus(null);
+    setExFormError(null);
+    setIsExclusiveItemModalOpen(true);
+  };
+
+  const handleSelectSlotFile = (
+    slotKey: BsMartImageSlotKey,
+    file: File | null
+  ) => {
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    setExPendingFiles((prev) => ({ ...prev, [slotKey]: file }));
+    setExFilePreviews((prev) => {
+      if (prev[slotKey]) {
+        URL.revokeObjectURL(prev[slotKey]!);
+      }
+      return { ...prev, [slotKey]: previewUrl };
+    });
+  };
+
+  const handleRemoveSlotImage = (slotKey: BsMartImageSlotKey) => {
+    setExPendingFiles((prev) => {
+      const next = { ...prev };
+      delete next[slotKey];
+      return next;
+    });
+    setExFilePreviews((prev) => {
+      const next = { ...prev };
+      if (next[slotKey]) {
+        URL.revokeObjectURL(next[slotKey]!);
+        delete next[slotKey];
+      }
+      return next;
+    });
+    setExExistingImages((prev) => {
+      const next = { ...prev };
+      delete next[slotKey];
+      return next;
+    });
+  };
+
+  const getSlotExistingPreviewUrl = (
+    slotVal: R2SlotJson | string | undefined
+  ): string | null => {
+    if (!slotVal) return null;
+    if (typeof slotVal === "object" && slotVal.thumb) {
+      if (slotVal.thumb.startsWith("http")) return slotVal.thumb;
+      return `https://pub-91d344728db8455caa2530306bdfbcb0.r2.dev/${slotVal.thumb.replace(
+        /^\/+/,
+        ""
+      )}`;
+    }
+    if (typeof slotVal === "string") {
+      if (slotVal.startsWith("http")) return slotVal;
+      return `https://pub-91d344728db8455caa2530306bdfbcb0.r2.dev/thumbs/${slotVal.replace(
+        /^\/+/,
+        ""
+      )}`;
+    }
+    return null;
+  };
+
+  const handleSaveExclusiveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!staffUser) return;
+
+    const trimmedName = exItemName.trim();
+    const numericSrp = Number(exSrp);
+    if (!trimmedName) {
+      setExFormError("Product name is required.");
+      return;
+    }
+    if (Number.isNaN(numericSrp) || numericSrp <= 0) {
+      setExFormError("B2C Retail Price (SRP) must be greater than $0.00.");
+      return;
+    }
+    if (!exClassId) {
+      setExFormError("Please select or create a category.");
+      return;
+    }
+
+    setExFormError(null);
+    setIsSavingExclusiveItem(true);
+
+    try {
+      const supabase = createClient();
+      const basePayload: Record<string, unknown> = {
+        item_id: editingExclusiveItem?.item_id ?? null,
+        code: exCode.trim() || null,
+        item_name: trimmedName,
+        description: exDescription.trim() || null,
+        class_id: Number(exClassId),
+        srp: numericSrp,
+        discount: Math.min(99, Math.max(0, Number(exDiscount) || 0)),
+        qtty: Math.max(0, Math.floor(Number(exQtty) || 0)),
+        upc: exUpc.trim() || null,
+        material: exMaterial.trim() || null,
+        house_rooms: exHouseRooms.trim() || null,
+        length: exLength.trim() ? Number(exLength) : null,
+        width: exWidth.trim() ? Number(exWidth) : null,
+        thickness: exThickness.trim() ? Number(exThickness) : null,
+        tags: exTags.trim() || null,
+        is_b2c_hidden: exIsHidden,
+      };
+
+      const mergedImages: Record<string, unknown> = { ...exExistingImages };
+      const pendingEntries = Object.entries(exPendingFiles).filter(
+        (entry): entry is [BsMartImageSlotKey, File] => Boolean(entry[1])
+      );
+
+      let allocatedItemId = editingExclusiveItem?.item_id ?? null;
+      let allocatedCode = exCode.trim() || editingExclusiveItem?.code || "";
+
+      // Step 1: Upsert metadata first if creating a new item (to allocate item_id >= 900001 and code)
+      // or if there are no new image files to upload.
+      if (!allocatedItemId || pendingEntries.length === 0) {
+        setExUploadStatus("Saving B's Mart Exclusive Item record...");
+        const { data: firstData, error: firstErr } = await supabase.rpc(
+          "smart_admin_upsert_exclusive_item",
+          {
+            p_staff_user_id: staffUser.user_id,
+            p_payload: {
+              ...basePayload,
+              images:
+                Object.keys(mergedImages).length > 0 ? mergedImages : null,
+            },
+          }
+        );
+
+        const firstRes = firstData as {
+          success: boolean;
+          item_id?: number;
+          item?: ItemWithImages;
+          error?: string;
+        } | null;
+
+        if (firstErr || !firstRes?.success) {
+          setExFormError(
+            firstRes?.error ||
+              firstErr?.message ||
+              "Failed to save exclusive item."
+          );
+          return;
+        }
+
+        allocatedItemId =
+          firstRes.item_id ?? firstRes.item?.item_id ?? allocatedItemId;
+        allocatedCode =
+          firstRes.item?.code || allocatedCode || `BSM-${allocatedItemId}`;
+      }
+
+      // Step 2: Upload any newly selected image slots to Cloudflare R2 (`bsmart/` folder)
+      if (pendingEntries.length > 0 && allocatedItemId) {
+        for (let i = 0; i < pendingEntries.length; i++) {
+          const [slotKey, file] = pendingEntries[i];
+          setExUploadStatus(
+            `Optimizing & uploading ${slotKey.toUpperCase()} (${i + 1}/${
+              pendingEntries.length
+            }) to Cloudflare R2 (bsmart/)...`
+          );
+          const uploadedUrls = await uploadBsMartSlotToR2({
+            file,
+            itemId: allocatedItemId,
+            code: allocatedCode || `BSM-${allocatedItemId}`,
+            slotKey,
+            staffUserId: staffUser.user_id,
+          });
+          mergedImages[slotKey] = uploadedUrls;
+        }
+
+        // Step 3: Persist the merged Cloudflare R2 URLs in public.smart_item_images
+        setExUploadStatus("Finalizing Cloudflare R2 image gallery...");
+        const { data: finalData, error: finalErr } = await supabase.rpc(
+          "smart_admin_upsert_exclusive_item",
+          {
+            p_staff_user_id: staffUser.user_id,
+            p_payload: {
+              ...basePayload,
+              item_id: allocatedItemId,
+              code: allocatedCode,
+              images: mergedImages,
+            },
+          }
+        );
+
+        const finalRes = finalData as {
+          success: boolean;
+          error?: string;
+        } | null;
+
+        if (finalErr || !finalRes?.success) {
+          setExFormError(
+            finalRes?.error ||
+              finalErr?.message ||
+              "Uploaded images to R2, but failed to save gallery metadata."
+          );
+          return;
+        }
+      }
+
+      setCatalogFilter("EXCLUSIVE");
+      await loadCatalogOverrides();
+      setIsExclusiveItemModalOpen(false);
+      showToast(
+        editingExclusiveItem
+          ? `Updated B's Mart Exclusive Item ${allocatedCode} (#${allocatedItemId})`
+          : `Created B's Mart Exclusive Item ${allocatedCode} (#${allocatedItemId})`
+      );
+    } catch (err) {
+      setExFormError(
+        err instanceof Error
+          ? err.message
+          : "Unexpected error while saving exclusive item."
+      );
+    } finally {
+      setExUploadStatus(null);
+      setIsSavingExclusiveItem(false);
     }
   };
 
@@ -1125,7 +1561,7 @@ export function SmartAdminDashboard({
     );
   });
 
-  const filteredCategoriesForRules = categories.filter((cat) => {
+  const filteredCategoriesForRules = classes.filter((cat) => {
     if (!ruleSearch.trim()) return true;
     return cat.item_class
       .toLowerCase()
@@ -1607,22 +2043,37 @@ export function SmartAdminDashboard({
               <div>
                 <h3 className="text-sm sm:text-base font-black text-slate-900">
                   Category-Level Markup, Add-On &amp; Visibility Rules (
-                  {categories.length} Categories)
+                  {classes.length} Categories)
                 </h3>
                 <p className="text-slate-500">
                   Leave Category Markup % blank to inherit the Global Default (
                   {globalMarkupDraft}%).
                 </p>
               </div>
-              <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={ruleSearch}
-                  onChange={(e) => setRuleSearch(e.target.value)}
-                  placeholder="Filter categories..."
-                  className="w-full h-9 pl-8 pr-3 rounded-xl border border-slate-200"
-                />
+              <div className="flex items-center gap-2 flex-wrap">
+                {canManageCatalog && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCategoryFormError(null);
+                      setIsCategoryModalOpen(true);
+                    }}
+                    className="h-9 px-3.5 rounded-xl bg-smart-teal-deep hover:bg-smart-teal text-white font-black inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5 text-smart-gold" />
+                    <span>+ New Category</span>
+                  </button>
+                )}
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={ruleSearch}
+                    onChange={(e) => setRuleSearch(e.target.value)}
+                    placeholder="Filter categories..."
+                    className="w-full h-9 pl-8 pr-3 rounded-xl border border-slate-200"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1656,10 +2107,17 @@ export function SmartAdminDashboard({
                         className="hover:bg-slate-50/80"
                       >
                         <td className="py-2.5 px-3 font-black text-slate-900">
-                          {cat.item_class}
-                          <span className="ml-1.5 text-[10px] font-mono text-slate-400">
-                            #{cat.item_class_id}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>{cat.item_class}</span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              #{cat.item_class_id}
+                            </span>
+                            {cat.is_b2c_exclusive && (
+                              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black">
+                                ✨ B&apos;s Mart Exclusive
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2.5 px-3">
                           <input
@@ -1782,7 +2240,7 @@ export function SmartAdminDashboard({
       {/* ==================================================================== */}
       {subTab === "catalog" && canAccessTab("catalog") && (
         <section className="bg-white rounded-3xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs space-y-4 text-xs">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -1794,33 +2252,61 @@ export function SmartAdminDashboard({
               />
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              {(
-                isContentCreatorRole
-                  ? ([
-                      { id: "ALL", label: "All Products" },
-                      { id: "ON_SALE", label: "🔥 On Sale / Deals" },
-                    ] as const)
-                  : ([
-                      { id: "ALL", label: "All B2C Items" },
-                      { id: "CUSTOM_PRICE", label: "🔒 Custom Price Locked" },
-                      { id: "ON_SALE", label: "🔥 On B2C Sale" },
-                      { id: "HIDDEN", label: "🚫 Hidden in B2C" },
-                    ] as const)
-              ).map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setCatalogFilter(f.id)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-extrabold whitespace-nowrap cursor-pointer ${
-                    catalogFilter === f.id
-                      ? "bg-smart-teal text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+            <div className="flex items-center justify-between lg:justify-end gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                {(
+                  isContentCreatorRole
+                    ? ([
+                        { id: "ALL", label: "All Products" },
+                        { id: "EXCLUSIVE", label: "✨ B's Mart Exclusive" },
+                        { id: "ON_SALE", label: "🔥 On Sale / Deals" },
+                      ] as const)
+                    : ([
+                        { id: "ALL", label: "All B2C Items" },
+                        { id: "EXCLUSIVE", label: "✨ B's Mart Exclusive" },
+                        { id: "CUSTOM_PRICE", label: "🔒 Custom Price Locked" },
+                        { id: "ON_SALE", label: "🔥 On B2C Sale" },
+                        { id: "HIDDEN", label: "🚫 Hidden in B2C" },
+                      ] as const)
+                ).map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setCatalogFilter(f.id)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-extrabold whitespace-nowrap cursor-pointer ${
+                      catalogFilter === f.id
+                        ? "bg-smart-teal text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {canManageCatalog && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCategoryFormError(null);
+                      setIsCategoryModalOpen(true);
+                    }}
+                    className="h-9 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5 text-smart-teal" />
+                    <span>+ New Category</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openCreateExclusiveItemModal}
+                    className="h-9 px-3.5 rounded-xl bg-smart-gold hover:bg-smart-gold-hover text-slate-950 font-black inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>+ Create B&apos;s Mart Item</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1883,9 +2369,16 @@ export function SmartAdminDashboard({
                                 className="w-12 h-12 rounded-xl object-cover bg-slate-100 border border-slate-200 shrink-0"
                               />
                               <div className="max-w-[280px]">
-                                <p className="font-black text-slate-900 hover:text-smart-teal truncate">
-                                  {item.item_name}
-                                </p>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-black text-slate-900 hover:text-smart-teal truncate">
+                                    {item.item_name}
+                                  </p>
+                                  {item.is_b2c_exclusive && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-black">
+                                      ✨ B&apos;s Mart Exclusive
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
                                   <span>SKU: {item.code}</span>
                                   {item.material && (
@@ -1966,10 +2459,17 @@ export function SmartAdminDashboard({
                               alt={item.item_name}
                               className="w-10 h-10 rounded-lg object-cover bg-slate-100 border border-slate-200 group-hover:border-smart-teal shrink-0"
                             />
-                            <div className="max-w-[230px]">
-                              <p className="font-black text-slate-900 group-hover:text-smart-teal truncate">
-                                {item.item_name}
-                              </p>
+                            <div className="max-w-[240px]">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-black text-slate-900 group-hover:text-smart-teal truncate">
+                                  {item.item_name}
+                                </p>
+                                {item.is_b2c_exclusive && (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-black">
+                                    ✨ B&apos;s Mart Exclusive
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
                                 <span>SKU: {item.code}</span>
                                 <span>• Stock: {Number(item.qtty)}</span>
@@ -1981,7 +2481,9 @@ export function SmartAdminDashboard({
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-500">
                           ${Number(item.base_b2b_srp ?? item.srp).toFixed(2)}
                           <div className="text-[10px] text-slate-400">
-                            {item.is_custom_price
+                            {item.is_b2c_exclusive
+                              ? "B's Mart Exclusive"
+                              : item.is_custom_price
                               ? "Custom Override"
                               : `+${Number(
                                   item.markup_percent_applied ?? 0
@@ -2074,6 +2576,17 @@ export function SmartAdminDashboard({
 
                         <td className="py-2.5 px-3 text-right">
                           <div className="inline-flex items-center gap-1.5">
+                            {canManageCatalog && item.is_b2c_exclusive && (
+                              <button
+                                type="button"
+                                onClick={() => openEditExclusiveItemModal(item)}
+                                title="Edit B's Mart Exclusive Item Details, Stock & Cloudflare R2 Photos"
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 font-black inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Edit Item / Stock / Photos</span>
+                              </button>
+                            )}
                             {canViewCatalog && (
                               <button
                                 type="button"
@@ -2097,19 +2610,20 @@ export function SmartAdminDashboard({
                                     ? "Saving..."
                                     : "Save"}
                                 </button>
-                                {(item.is_custom_price ||
-                                  item.is_custom_discount) && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleUnlockItemAutoPricing(item)
-                                    }
-                                    title="Unlock custom price & revert to automatic category markup rule"
-                                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
-                                  >
-                                    <Unlock className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
+                                {!item.is_b2c_exclusive &&
+                                  (item.is_custom_price ||
+                                    item.is_custom_discount) && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUnlockItemAutoPricing(item)
+                                      }
+                                      title="Unlock custom price & revert to automatic category markup rule"
+                                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                                    >
+                                      <Unlock className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                               </>
                             )}
                           </div>
@@ -2964,7 +3478,7 @@ export function SmartAdminDashboard({
               Category Visibility (Click to Hide/Unhide from Storefront)
             </p>
             <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-3 rounded-2xl bg-slate-50 border border-slate-200/70">
-              {categories.map((cat) => {
+              {classes.map((cat) => {
                 const isHidden = (
                   settingsDraft.hidden_categories || []
                 ).includes(cat.item_class_id);
@@ -2980,12 +3494,599 @@ export function SmartAdminDashboard({
                     }`}
                   >
                     {cat.item_class}
+                    {cat.is_b2c_exclusive ? " ✨" : ""}
                   </button>
                 );
               })}
             </div>
           </div>
         </form>
+      )}
+
+      {/* ==================================================================== */}
+      {/* MODAL: Create B's Mart Exclusive Category                            */}
+      {/* ==================================================================== */}
+      {isCategoryModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => !isSavingCategory && setIsCategoryModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-smart-teal-deep text-white px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FolderPlus className="w-4 h-4 text-smart-gold" />
+                <div>
+                  <h3 className="text-sm font-black">
+                    New B&apos;s Mart Exclusive Category
+                  </h3>
+                  <p className="text-[10px] text-white/75">
+                    Stored in `public.smart_item_classes` (`item_class_id &gt;= 9001`)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSavingCategory}
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleCreateExclusiveCategory}
+              className="p-5 space-y-4 text-xs"
+            >
+              {categoryFormError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-bold">
+                  {categoryFormError}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-black text-slate-800 mb-1">
+                  Category Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  placeholder="e.g. Gift Bundles, Seasonal Decor, B's Mart Specials"
+                  className="w-full h-10 px-3 rounded-xl border border-slate-200 font-bold text-slate-900 focus:outline-none focus:border-smart-teal"
+                />
+              </div>
+
+              <div>
+                <label className="block font-black text-slate-800 mb-1">
+                  Description (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newCatDesc}
+                  onChange={(e) => setNewCatDesc(e.target.value)}
+                  placeholder="Short note for merchandising reference"
+                  className="w-full h-10 px-3 rounded-xl border border-slate-200 text-slate-700 focus:outline-none focus:border-smart-teal"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSavingCategory}
+                  onClick={() => setIsCategoryModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCategory}
+                  className="px-4 py-2 rounded-xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSavingCategory ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-smart-gold" />
+                      <span>Create Category</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* MODAL: Create / Edit B's Mart Exclusive Item & Cloudflare R2 Photos  */}
+      {/* ==================================================================== */}
+      {isExclusiveItemModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
+          onClick={() =>
+            !isSavingExclusiveItem && setIsExclusiveItemModalOpen(false)
+          }
+        >
+          <div
+            className="w-full max-w-4xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-smart-teal-deep via-smart-teal to-[#0077A8] text-white px-5 py-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-smart-gold text-slate-950">
+                  <Sparkles className="w-4 h-4" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-black">
+                      {editingExclusiveItem
+                        ? `Edit B's Mart Exclusive Item (${editingExclusiveItem.code})`
+                        : "Create B's Mart Exclusive Item"}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-white/15 text-[10px] font-black uppercase">
+                      Isolated from B2B Catalog
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/80">
+                    Stored in `public.smart_items` (`item_id &gt;= 900001`) &amp;
+                    Cloudflare R2 (`bsmart/` folder)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSavingExclusiveItem}
+                onClick={() => setIsExclusiveItemModalOpen(false)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scrollable Form Body */}
+            <form
+              onSubmit={handleSaveExclusiveItem}
+              className="p-5 sm:p-6 overflow-y-auto space-y-5 text-xs flex-1"
+            >
+              {exFormError && (
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-bold">
+                  {exFormError}
+                </div>
+              )}
+
+              {exUploadStatus && (
+                <div className="p-3.5 rounded-2xl bg-smart-teal-light/60 border border-smart-teal/30 text-smart-teal-deep font-black flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-smart-teal shrink-0" />
+                  <span>{exUploadStatus}</span>
+                </div>
+              )}
+
+              {/* Row 1: Product Name, SKU Code, Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+                <div className="sm:col-span-6">
+                  <label className="block font-black text-slate-800 mb-1">
+                    Product Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={exItemName}
+                    onChange={(e) => setExItemName(e.target.value)}
+                    placeholder="e.g. Luxury Marble Serving Tray Set"
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 font-bold text-slate-900 focus:outline-none focus:border-smart-teal"
+                  />
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="block font-black text-slate-800 mb-1">
+                    SKU Code (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={exCode}
+                    onChange={(e) => setExCode(e.target.value.toUpperCase())}
+                    placeholder="Auto: BSM-900001"
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 font-mono font-bold text-slate-900 uppercase focus:outline-none focus:border-smart-teal"
+                  />
+                </div>
+
+                <div className="sm:col-span-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-black text-slate-800">
+                      Category *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCategoryFormError(null);
+                        setIsCategoryModalOpen(true);
+                      }}
+                      className="text-[10px] font-black text-smart-teal hover:underline cursor-pointer"
+                    >
+                      + New Category
+                    </button>
+                  </div>
+                  <select
+                    value={exClassId}
+                    onChange={(e) => setExClassId(Number(e.target.value))}
+                    className="w-full h-10 px-2.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-900 focus:outline-none focus:border-smart-teal"
+                  >
+                    {classes.map((cat) => (
+                      <option key={cat.item_class_id} value={cat.item_class_id}>
+                        {cat.item_class}
+                        {cat.is_b2c_exclusive ? " ✨ (Exclusive)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Pricing & Stock (SRP, Discount %, Live Net Price Preview, Stock Qtty) */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <div className="sm:col-span-3">
+                  <label className="block font-black text-slate-800 mb-1">
+                    B2C Retail Price ($) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0.01"
+                    step="0.01"
+                    value={exSrp}
+                    onChange={(e) => setExSrp(e.target.value)}
+                    placeholder="24.99"
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white font-black text-slate-900 tabular-numbers"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-black text-slate-800 mb-1">
+                    Sale Discount (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="99"
+                    step="1"
+                    value={exDiscount}
+                    onChange={(e) => setExDiscount(e.target.value)}
+                    placeholder="0"
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white font-black text-smart-sale tabular-numbers"
+                  />
+                </div>
+
+                <div className="sm:col-span-3 flex flex-col justify-center px-3 py-2 rounded-xl bg-white border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    Live Net Shopper Price
+                  </span>
+                  <div className="flex items-baseline gap-1.5 mt-0.5">
+                    <span className="text-base font-black text-smart-teal tabular-numbers">
+                      $
+                      {(
+                        Math.max(0, Number(exSrp) || 0) *
+                        (1 -
+                          Math.min(99, Math.max(0, Number(exDiscount) || 0)) /
+                            100)
+                      ).toFixed(2)}
+                    </span>
+                    {Number(exDiscount) > 0 && Number(exSrp) > 0 && (
+                      <span className="text-[11px] text-slate-400 line-through tabular-numbers">
+                        ${Number(exSrp).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="sm:col-span-4">
+                  <label className="block font-black text-slate-800 mb-1">
+                    Available Stock Quantity (`qtty`) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="1"
+                    value={exQtty}
+                    onChange={(e) => setExQtty(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white font-black text-slate-900 tabular-numbers"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Auto-deducted on customer orders &amp; restored on
+                    cancellation
+                  </p>
+                </div>
+              </div>
+
+              {/* Row 3: Specifications (Material, Room, Dimensions, Barcode, Tags) */}
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Material
+                  </label>
+                  <input
+                    type="text"
+                    value={exMaterial}
+                    onChange={(e) => setExMaterial(e.target.value)}
+                    placeholder="e.g. Porcelain, Bamboo"
+                    className="w-full h-9 px-3 rounded-xl border border-slate-200"
+                  />
+                </div>
+
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Room / Usage
+                  </label>
+                  <input
+                    type="text"
+                    value={exHouseRooms}
+                    onChange={(e) => setExHouseRooms(e.target.value)}
+                    placeholder="e.g. Kitchen, Living Room"
+                    className="w-full h-9 px-3 rounded-xl border border-slate-200"
+                  />
+                </div>
+
+                <div className="col-span-2 sm:col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Barcode / UPC
+                  </label>
+                  <input
+                    type="text"
+                    value={exUpc}
+                    onChange={(e) => setExUpc(e.target.value)}
+                    placeholder="Optional barcode"
+                    className="w-full h-9 px-3 rounded-xl border border-slate-200 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Length (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={exLength}
+                    onChange={(e) => setExLength(e.target.value)}
+                    placeholder="L"
+                    className="w-full h-9 px-2.5 rounded-xl border border-slate-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Width (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={exWidth}
+                    onChange={(e) => setExWidth(e.target.value)}
+                    placeholder="W"
+                    className="w-full h-9 px-2.5 rounded-xl border border-slate-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Height / Thick (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={exThickness}
+                    onChange={(e) => setExThickness(e.target.value)}
+                    placeholder="H"
+                    className="w-full h-9 px-2.5 rounded-xl border border-slate-200"
+                  />
+                </div>
+
+                <div className="col-span-2 sm:col-span-3">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Search Tags (Comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={exTags}
+                    onChange={(e) => setExTags(e.target.value)}
+                    placeholder="e.g. gift, new arrival, luxury"
+                    className="w-full h-9 px-3 rounded-xl border border-slate-200"
+                  />
+                </div>
+              </div>
+
+              {/* Row 4: Description & Storefront Visibility */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-start">
+                <div className="sm:col-span-9">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Product Description
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={exDescription}
+                    onChange={(e) => setExDescription(e.target.value)}
+                    placeholder="Highlight features, dimensions, or bundle contents for shoppers..."
+                    className="w-full p-3 rounded-xl border border-slate-200 resize-none focus:outline-none focus:border-smart-teal"
+                  />
+                </div>
+
+                <div className="sm:col-span-3 pt-1">
+                  <label className="p-3 rounded-2xl border border-slate-200 bg-slate-50 flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exIsHidden}
+                      onChange={(e) => setExIsHidden(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300 text-smart-teal"
+                    />
+                    <div>
+                      <p className="font-black text-slate-900">
+                        Hide from Storefront
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Save as draft without showing publicly yet.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Row 5: Cloudflare R2 (`bsmart/` Folder) Multi-Angle Image Uploader */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <div>
+                    <h4 className="font-black text-slate-900 flex items-center gap-1.5">
+                      <Upload className="w-4 h-4 text-smart-teal" />
+                      <span>
+                        Cloudflare R2 (`bsmart/` Folder) Multi-Angle Image
+                        Uploader
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Each selected photo is automatically optimized into 3 WebP
+                      tiers (`thumb` 400px, `view` 1200px, `raw` 2048px) and
+                      uploaded to `bsmart/` in Cloudflare R2.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                  {BSMART_IMAGE_SLOTS.map((slot) => {
+                    const localPreview = exFilePreviews[slot.key];
+                    const existingPreview = getSlotExistingPreviewUrl(
+                      exExistingImages[slot.key]
+                    );
+                    const previewSrc = localPreview || existingPreview;
+
+                    return (
+                      <div
+                        key={slot.key}
+                        className={`rounded-2xl border p-2.5 flex flex-col justify-between gap-2 ${
+                          slot.key === "hero1"
+                            ? "border-smart-teal/50 bg-smart-teal-light/20"
+                            : "border-slate-200 bg-slate-50/70"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-black text-[11px] text-slate-900 truncate">
+                              {slot.label}
+                            </span>
+                            {previewSrc && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSlotImage(slot.key)}
+                                title="Remove slot image"
+                                className="p-0.5 rounded bg-rose-100 text-rose-700 hover:bg-rose-200 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-[9px] text-slate-500 leading-tight mt-0.5">
+                            {slot.hint}
+                          </p>
+                        </div>
+
+                        {previewSrc ? (
+                          <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-white border border-slate-200">
+                            <img
+                              src={previewSrc}
+                              alt={slot.label}
+                              className="w-full h-full object-cover"
+                            />
+                            {localPreview && (
+                              <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-smart-teal text-white text-[9px] font-black">
+                                Ready to Upload
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <label className="w-full aspect-square rounded-xl border-2 border-dashed border-slate-300 hover:border-smart-teal bg-white/80 flex flex-col items-center justify-center gap-1 text-center p-2 cursor-pointer transition-colors">
+                            <Upload className="w-4 h-4 text-slate-400" />
+                            <span className="text-[10px] font-bold text-slate-600">
+                              Select Photo
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) =>
+                                handleSelectSlotFile(
+                                  slot.key,
+                                  e.target.files?.[0] || null
+                                )
+                              }
+                            />
+                          </label>
+                        )}
+
+                        {previewSrc && (
+                          <label className="w-full py-1 rounded-lg bg-white border border-slate-200 hover:border-smart-teal text-center text-[10px] font-extrabold text-slate-700 cursor-pointer">
+                            Replace Photo
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) =>
+                                handleSelectSlotFile(
+                                  slot.key,
+                                  e.target.files?.[0] || null
+                                )
+                              }
+                            />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSavingExclusiveItem}
+                  onClick={() => setIsExclusiveItemModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingExclusiveItem}
+                  className="px-5 py-2.5 rounded-xl bg-smart-teal hover:bg-smart-teal-hover text-white font-black inline-flex items-center gap-2 shadow-sm cursor-pointer"
+                >
+                  {isSavingExclusiveItem ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Uploading &amp; Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 text-smart-gold" />
+                      <span>
+                        {editingExclusiveItem
+                          ? "Save Item, Stock & Photos"
+                          : "Create B's Mart Exclusive Item"}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Order Details Modal */}

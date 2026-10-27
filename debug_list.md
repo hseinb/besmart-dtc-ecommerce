@@ -11,6 +11,20 @@ This file tracks bugs, UI glitches, sync issues, and platform discrepancies acro
 
 ## Resolved Issues
 
+### BUG-008: Phone Back Button Closes Browser or App Instead of Returning in Navigation
+- **Status**: `Resolved`
+- **Description & Reproduction Steps**:
+  1. Open B's Mart on a mobile browser (Android Chrome, iOS Safari, WhatsApp/Instagram in-app browser) or the native Capacitor Android/iOS app.
+  2. Navigate across tabs (`Categories`, `Deals`, `Bag`, `Me`), select a category/campaign filter, open a Product Detail Modal (or image zoom lightbox), or open the Checkout / Bag drawer.
+  3. Press the phone's hardware/gesture Back button — the browser tab closes or the app exits instead of stepping back to the previous modal, product, filter, or tab.
+- **Root Causes**:
+  1. **No Browser History Entries (`window.history.pushState` / `popstate`)**: All navigation state (`activeTab`, `selectedClassId`, `selectedTag`, `selectedProduct`, `isBagDrawerOpen`, and component-level modals) updated client Zustand/React state without pushing entries to `window.history` or listening to `popstate`.
+  2. **Missing Capacitor `backButton` Listener ([SmartAppShell.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/layout/SmartAppShell.tsx))**: `CapApp.addListener("appUrlOpen", ...)` was registered for deep links, but `CapApp.addListener("backButton", ...)` was not registered to intercept hardware back presses on Android/iOS.
+- **Resolution**:
+  1. Added `navHistory`, `productHistory`, a LIFO modal `backHandlers` registry (`registerBackHandler`), `stepBackProductDetail`, and a unified `handleBackNavigation()` action to [useSmartNavStore.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/store/useSmartNavStore.ts) that pushes browser history states on navigation and walks backward through open modals $\rightarrow$ product history $\rightarrow$ drawers $\rightarrow$ tab/category/filter snapshots $\rightarrow$ Home.
+  2. Created [useSmartBackGuard.ts](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/hooks/useSmartBackGuard.ts) and wired it to all modals and overlays across [SmartProductDetailModal.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/product/SmartProductDetailModal.tsx), [SmartBagDrawer.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/bag/SmartBagDrawer.tsx), [SmartBagView.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/bag/SmartBagView.tsx), [SmartHeader.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/layout/SmartHeader.tsx), [SmartMeView.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/profile/SmartMeView.tsx), [SmartAdminDashboard.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/admin/SmartAdminDashboard.tsx), and [SmartAppShell.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/layout/SmartAppShell.tsx).
+  3. Added a browser history sentinel + `popstate` listener and `CapApp.addListener("backButton", ...)` in [SmartAppShell.tsx](file:///c:/Users/hussi/agy-cli-projects/Besmart/src/components/layout/SmartAppShell.tsx) so pressing Back on phones always returns in navigation and never closes the browser or app.
+
 ### BUG-007: Content Creator (`bissan`) Cannot Access Item Image Downloading on Desktop Browser
 - **Status**: `Resolved`
 - **Description & Reproduction Steps**:

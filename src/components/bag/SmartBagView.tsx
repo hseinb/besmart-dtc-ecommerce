@@ -25,6 +25,7 @@ import {
   SmartDeliveryZone,
 } from "@/types/smart.types";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import {
   useSmartCartStore,
   computeBagTotals,
@@ -74,6 +75,8 @@ export function SmartBagView({
   >([]);
   const [isLoadingRecs, setIsLoadingRecs] = useState(false);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
+
+  useSmartBackGuard(isCheckoutOpen, () => setIsCheckoutOpen(false));
 
   const allSelected =
     lines.length > 0 && lines.every((line) => line.selected);

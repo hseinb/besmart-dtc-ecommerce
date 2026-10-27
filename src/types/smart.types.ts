@@ -30,12 +30,15 @@ export interface CatalogItem {
   base_b2b_srp?: number;
   is_active: boolean;
   is_b2c_hidden?: boolean;
+  is_b2c_exclusive?: boolean;
   is_custom_price?: boolean;
   is_custom_discount?: boolean;
   markup_percent_applied?: number;
   modified_date: string;
   image_updated_at: string | null;
 }
+
+export type SmartItem = CatalogItem;
 
 export interface ItemClass {
   item_class_id: number;
@@ -44,6 +47,7 @@ export interface ItemClass {
   parent_class_id: number | null;
   def_commission: number | null;
   def_discount: number | null;
+  is_b2c_exclusive?: boolean;
   modified_date: string;
 }
 
@@ -57,11 +61,16 @@ export interface ItemImages {
   angle4: Json | null;
   angle5: Json | null;
   video: string | null;
+  images?: Json | Record<string, unknown> | null;
   updated_at: string;
+  [key: string]: unknown;
 }
+
+export type ItemImageRecord = ItemImages;
 
 export interface ItemWithImages extends CatalogItem {
   item_images?: ItemImages | ItemImages[] | null;
+  smart_item_images?: ItemImages | ItemImages[] | null;
 }
 
 export interface ItemTag {

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { SmartCoupon, SmartDeliveryZone } from "@/types/smart.types";
 import { useSmartNavStore } from "@/store/useSmartNavStore";
+import { useSmartBackGuard } from "@/hooks/useSmartBackGuard";
 import {
   useSmartCartStore,
   computeBagTotals,
@@ -51,6 +52,8 @@ export function SmartBagDrawer({
 
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [drawerShareCopied, setDrawerShareCopied] = useState(false);
+
+  useSmartBackGuard(isCheckoutOpen, () => setIsCheckoutOpen(false));
 
   const defaultFee =
     deliveryZones[0]?.delivery_fee ?? appSettings.default_delivery_fee ?? 3;

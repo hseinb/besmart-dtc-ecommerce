@@ -66,7 +66,8 @@ This document tracks finalized brand/UI specs, active feature discussions, and t
 ---
 
 ## 2. Active Discussion
-*(No active pending discussions — all approved ideas moved to Completed Ideas below.)*
+
+*(No active pending discussions — all planned phases through Phase 15 are complete.)*
 
 ---
 
@@ -113,5 +114,9 @@ This document tracks finalized brand/UI specs, active feature discussions, and t
   2. **Multi-Quality Image & Angle Selector (`SmartCreatorShareModal.tsx` & `src/lib/media.ts`)**: Exposed all populated image slots (`hero1`, `dim1`, `angle1`–`angle5`) across **`Thumb`** (Fast Compact WebP), **`View`** (HD Studio WebP), and **`Raw`** (Original Master via `r2-image-proxy`), with single-angle and **"Save All Angles"** device downloads.
   3. **Accompanying Caption Builder & Native File + Text Share**: Added field toggles (`Item Name`, `Price & Discount`, `Description & Specs`, `SKU Code`, `Product Link`), an editable caption textarea, automatic clipboard copy, and Web Share Level 2 (`navigator.share({ files, title, text })`) across `SmartProductCard.tsx`, `SmartProductDetailModal.tsx`, and `SmartAdminDashboard.tsx`.
 
-
-
+### Phase 15 — B's Mart–Exclusive Custom Items, Categories, Stock Lifecycle & Cloudflare R2 (`bsmart/` Folder) Uploader
+- **Status**: Completed
+- **Summary**:
+  1. **Isolated Schema & Sequences (`public.smart_item_classes`, `public.smart_item_images`, `public.smart_items`)**: Created `smart_item_classes` (`item_class_id >= 9001` for B's Mart–exclusive categories), `smart_item_images` (`REFERENCES public.smart_items(item_id)`), and `smart_items_exclusive_id_seq` (`item_id >= 900001` with `is_b2c_exclusive = true`), repointing `smart_order_details`, `smart_wishlists`, and `smart_app_events` foreign keys to `public.smart_items(item_id)`.
+  2. **Automatic Stock Lifecycle & Order Mirroring**: Added triggers to deduct `smart_items.qtty` on order placement for `is_b2c_exclusive = true` items, restore `qtty` on cancellation, and filter `smart_mirror_order_to_b2b` so only B HOME items (`EXISTS in public.items`) are mirrored to `public.orders` / `public.order_details` under `acct_id = 3899`.
+  3. **Cloudflare R2 (`bsmart/` Folder) Uploader & Admin UI (`src/lib/r2Upload.ts`, `SmartAdminDashboard.tsx`)**: Implemented 3-tier client-side WebP optimization (`thumb` 400px, `view` 1200px, `raw` 2048px) uploading via `bsmart-r2-uploader` Worker to `bsmart/` in R2, switched storefront/admin queries to `smart_item_classes` and `item_images:smart_item_images`, and added the **`+ New Category`** and **`+ Create / Edit B's Mart Item`** modals with `"✨ B's Mart Exclusive"` filter pills and badges.

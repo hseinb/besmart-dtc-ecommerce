@@ -23,8 +23,8 @@ export async function fetchProductRecommendations(
 ): Promise<ProductRecommendationsResult> {
   const supabase = createClient();
   const selectClause = settings.require_images
-    ? "*, item_images!inner(*)"
-    : "*, item_images(*)";
+    ? "*, item_images:smart_item_images!inner(*)"
+    : "*, item_images:smart_item_images(*)";
   const hiddenSet = new Set((settings.hidden_categories || []).map(Number));
 
   let salesPitch: string | null = null;
